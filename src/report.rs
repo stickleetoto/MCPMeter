@@ -1,9 +1,8 @@
 use crate::event::{Direction, MeasurementEvent};
-use anyhow::{Context, Result};
+use crate::trace::{read_events, select_run};
+use anyhow::Result;
 use serde::Serialize;
 use std::collections::BTreeSet;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 #[derive(Debug, Serialize)]
@@ -34,36 +33,8 @@ pub struct RunReport {
 }
 
 pub fn build_report(path: &Path, requested_run: Option<&str>) -> Result<RunReport> {
-    let file = File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    let reader = BufReader::new(file);
-    let mut events = Vec::new();
-
-    for (index, line) in reader.lines().enumerate() {
-        let line = line.with_context(|| format!("failed reading line {}", index + 1))?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let event: MeasurementEvent = serde_json::from_str(&line)
-            .with_context(|| format!("invalid trace event on line {}", index + 1))?;
-        events.push(event);
-    }
-
-    let run_id = match requested_run {
-        Some(run) => run.to_string(),
-        None => events
-            .iter()
-            .max_by_key(|event| event.ts_unix_ns)
-            .map(|event| event.run_id.clone())
-            .context("trace contains no events")?,
-    };
-
-    let selected: Vec<&MeasurementEvent> = events
-        .iter()
-        .filter(|event| event.run_id == run_id)
-        .collect();
-    if selected.is_empty() {
-        anyhow::bail!("run id not found in trace: {run_id}");
-    }
+    let events = read_events(path)?;
+    let (run_id, selected) = select_run(&events, requested_run)?;
 
     let tokenizer = selected[0].tokenizer.clone();
     let token_count_estimated = selected.iter().any(|event| event.token_count_estimated);
