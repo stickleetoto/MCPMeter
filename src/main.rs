@@ -6,6 +6,8 @@ mod proxy;
 mod report;
 mod runs;
 mod tokenizer;
+mod tool_cost;
+mod trace;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -46,6 +48,20 @@ enum Commands {
 
     /// Summarize a JSONL trace. Defaults to the most recent run in the file.
     Report {
+        /// JSONL trace produced by `mcp-meter proxy`.
+        trace: PathBuf,
+
+        /// Report a specific run id instead of the most recent run.
+        #[arg(long)]
+        run_id: Option<String>,
+
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show per-tool token, wire, error, and latency costs.
+    Tools {
         /// JSONL trace produced by `mcp-meter proxy`.
         trace: PathBuf,
 
@@ -125,6 +141,18 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 report::print_text(&report);
+            }
+        }
+        Commands::Tools {
+            trace,
+            run_id,
+            json,
+        } => {
+            let summary = tool_cost::build_tool_cost(&trace, run_id.as_deref())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&summary)?);
+            } else {
+                tool_cost::print_text(&summary);
             }
         }
         Commands::Runs { trace, json } => {
