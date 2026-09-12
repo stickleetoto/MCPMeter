@@ -3,12 +3,12 @@ use crate::tokenizer::TokenizerProfile;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub struct PendingRequest {
     method: String,
     tool: Option<String>,
-    started: Instant,
+    observed_at: Instant,
 }
 
 pub type PendingMap = HashMap<String, PendingRequest>;
@@ -35,11 +35,29 @@ pub fn observe_payload(
     capture_payloads: bool,
     pending: &mut PendingMap,
 ) -> MeasurementEvent {
-    let ts_unix_ns = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    observe_payload_at(
+        payload,
+        direction,
+        run_id,
+        tokenizer,
+        capture_payloads,
+        pending,
+        Instant::now(),
+        unix_now_ns(),
+    )
+}
 
+#[allow(clippy::too_many_arguments)]
+pub fn observe_payload_at(
+    payload: &[u8],
+    direction: Direction,
+    run_id: &str,
+    tokenizer: &TokenizerProfile,
+    capture_payloads: bool,
+    pending: &mut PendingMap,
+    observed_at: Instant,
+    ts_unix_ns: u128,
+) -> MeasurementEvent {
     let mut hasher = Sha256::new();
     hasher.update(payload);
     let payload_sha256 = format!("{:x}", hasher.finalize());
@@ -63,7 +81,14 @@ pub fn observe_payload(
         Ok(text) => match serde_json::from_str::<Value>(strip_transport_newline(text)) {
             Ok(value) => {
                 root_is_batch = value.is_array();
-                inspect_value(&value, direction, tokenizer, pending, &mut facts);
+                inspect_value(
+                    &value,
+                    direction,
+                    tokenizer,
+                    pending,
+                    observed_at,
+                    &mut facts,
+                );
             }
             Err(error) => {
                 facts.ok = false;
@@ -113,12 +138,13 @@ fn inspect_value(
     direction: Direction,
     tokenizer: &TokenizerProfile,
     pending: &mut PendingMap,
+    observed_at: Instant,
     facts: &mut Facts,
 ) {
     match value {
         Value::Array(items) => {
             for item in items {
-                inspect_value(item, direction, tokenizer, pending, facts);
+                inspect_value(item, direction, tokenizer, pending, observed_at, facts);
             }
         }
         Value::Object(object) => {
@@ -147,7 +173,7 @@ fn inspect_value(
                             PendingRequest {
                                 method: method.to_string(),
                                 tool,
-                                started: Instant::now(),
+                                observed_at,
                             },
                         );
                     }
@@ -172,7 +198,10 @@ fn inspect_value(
                             if let Some(tool) = request.tool {
                                 facts.tools.push(tool);
                             }
-                            let micros = request.started.elapsed().as_micros();
+                            let elapsed = observed_at
+                                .checked_duration_since(request.observed_at)
+                                .unwrap_or(Duration::ZERO);
+                            let micros = elapsed.as_micros();
                             facts.latencies_us.push(micros.min(u64::MAX as u128) as u64);
 
                             if request.method == "tools/list" {
@@ -208,13 +237,10 @@ fn classify_kind(batch: bool, malformed: bool, facts: &Facts) -> String {
     if batch {
         return "batch".to_string();
     }
-    if facts.request_count == 1 {
+    if facts.request_count == 1 && facts.response_count == 0 {
         return match facts.methods.first().map(String::as_str) {
-            Some("tools/list") if facts.response_count > 0 => "tools_list_response",
             Some("tools/list") => "tools_list_request",
-            Some("tools/call") if facts.response_count > 0 => "tools_call_response",
             Some("tools/call") => "tools_call_request",
-            _ if facts.response_count > 0 => "response",
             _ => "request",
         }
         .to_string();
@@ -243,6 +269,13 @@ fn strip_transport_newline(text: &str) -> &str {
         .unwrap_or(text)
 }
 
+pub fn unix_now_ns() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,33 +284,36 @@ mod tests {
     fn correlates_tool_call_response() {
         let tokenizer = TokenizerProfile::Bytes4Estimate;
         let mut pending = PendingMap::new();
-        let request = br#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"add","arguments":{"a":1,"b":2}}}
-"#;
-        let response = br#"{"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"3"}]}}
-"#;
+        let request = b"{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"tools/call\",\"params\":{\"name\":\"add\",\"arguments\":{\"a\":1,\"b\":2}}}\n";
+        let response = b"{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"3\"}]}}\n";
 
-        let req = observe_payload(
+        let start = Instant::now();
+        let req = observe_payload_at(
             request,
             Direction::ClientToServer,
             "test",
             &tokenizer,
             false,
             &mut pending,
+            start,
+            1,
         );
         assert_eq!(req.tool_call_count, 1);
         assert_eq!(req.tools, vec!["add"]);
         assert_eq!(pending.len(), 1);
 
-        let res = observe_payload(
+        let res = observe_payload_at(
             response,
             Direction::ServerToClient,
             "test",
             &tokenizer,
             false,
             &mut pending,
+            start + Duration::from_millis(2),
+            2,
         );
         assert_eq!(res.kind, "tools_call_response");
-        assert_eq!(res.latencies_us.len(), 1);
+        assert_eq!(res.latencies_us, vec![2_000]);
         assert!(pending.is_empty());
     }
 
