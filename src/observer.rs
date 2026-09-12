@@ -27,6 +27,7 @@ struct Facts {
     ok: bool,
 }
 
+#[cfg(test)]
 pub fn observe_payload(
     payload: &[u8],
     direction: Direction,
@@ -205,9 +206,8 @@ fn inspect_value(
                             facts.latencies_us.push(micros.min(u64::MAX as u128) as u64);
 
                             if request.method == "tools/list" {
-                                if let Some(tools) = object
-                                    .get("result")
-                                    .and_then(|v| v.get("tools"))
+                                if let Some(tools) =
+                                    object.get("result").and_then(|v| v.get("tools"))
                                 {
                                     if let Some(array) = tools.as_array() {
                                         let count = array.len() as u64;
