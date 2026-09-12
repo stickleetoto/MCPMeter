@@ -1,3 +1,4 @@
+mod compare;
 mod event;
 mod fixture;
 mod observer;
@@ -56,6 +57,27 @@ enum Commands {
         json: bool,
     },
 
+    /// Compare a candidate run against a baseline run.
+    Compare {
+        /// Baseline JSONL trace.
+        baseline: PathBuf,
+
+        /// Candidate JSONL trace.
+        candidate: PathBuf,
+
+        /// Select a specific baseline run instead of the newest one.
+        #[arg(long)]
+        baseline_run_id: Option<String>,
+
+        /// Select a specific candidate run instead of the newest one.
+        #[arg(long)]
+        candidate_run_id: Option<String>,
+
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Run the deterministic built-in MCP fixture server.
     #[command(hide = true)]
     Fixture,
@@ -92,6 +114,22 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 report::print_text(&report);
+            }
+        }
+        Commands::Compare {
+            baseline,
+            candidate,
+            baseline_run_id,
+            candidate_run_id,
+            json,
+        } => {
+            let baseline_report = report::build_report(&baseline, baseline_run_id.as_deref())?;
+            let candidate_report = report::build_report(&candidate, candidate_run_id.as_deref())?;
+            let comparison = compare::compare_reports(&baseline_report, &candidate_report)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&comparison)?);
+            } else {
+                compare::print_text(&comparison);
             }
         }
         Commands::Fixture => fixture::run()?,
