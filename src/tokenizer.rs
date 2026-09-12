@@ -45,8 +45,14 @@ mod tests {
 
     #[test]
     fn profiles_have_stable_names() {
-        assert_eq!(TokenizerProfile::parse("o200k-base").unwrap().name(), "o200k_base");
-        assert_eq!(TokenizerProfile::parse("cl100k").unwrap().name(), "cl100k_base");
+        assert_eq!(
+            TokenizerProfile::parse("o200k-base").unwrap().name(),
+            "o200k_base"
+        );
+        assert_eq!(
+            TokenizerProfile::parse("cl100k").unwrap().name(),
+            "cl100k_base"
+        );
         assert!(TokenizerProfile::parse("bytes4").unwrap().is_estimate());
     }
 
