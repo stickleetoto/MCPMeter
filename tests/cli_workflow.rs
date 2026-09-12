@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
-fn runs_and_compare_work_end_to_end() {
+fn runs_tools_and_compare_work_end_to_end() {
     let exe = env!("CARGO_BIN_EXE_mcp-meter");
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -34,6 +34,29 @@ fn runs_and_compare_work_end_to_end() {
 
     let candidate_id = runs[0]["run_id"].as_str().unwrap();
     let baseline_id = runs[1]["run_id"].as_str().unwrap();
+
+    let output = Command::new(exe)
+        .arg("tools")
+        .arg(&trace)
+        .arg("--run-id")
+        .arg(candidate_id)
+        .arg("--json")
+        .output()
+        .expect("run per-tool cost command");
+    assert!(output.status.success());
+
+    let tool_cost: Value = serde_json::from_slice(&output.stdout).expect("parse tool cost");
+    assert_eq!(tool_cost["tokenizer"], "bytes4_estimate");
+    let tools = tool_cost["tools"].as_array().expect("tools array");
+    let add = tools
+        .iter()
+        .find(|tool| tool["tool"] == "add")
+        .expect("add tool cost");
+    assert_eq!(add["calls"], 2);
+    assert!(add["request_tokens"].as_u64().unwrap() > 0);
+    assert!(add["response_tokens"].as_u64().unwrap() > 0);
+    assert_eq!(tool_cost["unattributed_batch_request_tokens"], 0);
+    assert_eq!(tool_cost["unattributed_batch_response_tokens"], 0);
 
     let output = Command::new(exe)
         .arg("compare")
