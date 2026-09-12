@@ -1,4 +1,4 @@
-use crate::event::{Direction, MeasurementEvent};
+use crate::event::Direction;
 use crate::trace::{read_events, select_run};
 use anyhow::Result;
 use serde::Serialize;
