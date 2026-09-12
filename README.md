@@ -1,8 +1,10 @@
 # MCPMeter
 
+[![CI](https://github.com/stickleetoto/MCPMeter/actions/workflows/ci.yml/badge.svg)](https://github.com/stickleetoto/MCPMeter/actions/workflows/ci.yml)
+
 **Measure the real cost of Model Context Protocol (MCP) servers.**
 
-MCPMeter is a local-first, transport-aware measurement proxy for MCP. It answers a practical question:
+MCPMeter is a local-first measurement proxy for MCP. It answers a practical question:
 
 > How much traffic, tokenized payload, latency, and tool overhead does an MCP server add — and is that cost worth it?
 
@@ -10,27 +12,29 @@ MCPMeter deliberately does **not** pretend that bytes observed on the MCP wire a
 
 ## Status
 
-**v0.1 development build — stdio measurement core is implemented.**
+**v0.1 development build — the stdio measurement core is operational.**
 
 Current features:
 
 - transparent stdio proxy for newline-delimited MCP JSON-RPC
-- asynchronous observation so tokenization is kept off the forwarding path
+- asynchronous observation so tokenization, hashing, parsing, and trace writing stay off the primary forwarding path
 - exact client→server / server→client byte accounting
-- serialized payload token counting with named tokenizer profiles
+- `o200k_base`, `cl100k_base`, and explicitly heuristic `bytes4_estimate` token profiles
 - `tools/list` catalog/schema token measurement
 - `tools/call` counting and tool-name attribution
 - request/response correlation by JSON-RPC id
-- boundary-to-boundary latency samples with p50/p95/p99 reporting
+- boundary-to-boundary latency samples with p50/p95/p99/max reporting
 - JSON-RPC batch observation
-- append-friendly JSONL traces
+- append-friendly, versioned JSONL traces
 - SHA-256 payload fingerprints
 - raw payload persistence **off by default**
+- `report`, `runs`, and baseline/candidate `compare` commands
+- text and machine-readable JSON output
 - deterministic built-in MCP fixture server
-- end-to-end proxy smoke test
-- CI with rustfmt, clippy, and tests
+- unit and end-to-end CLI/proxy regression tests
+- Linux and Windows CI quality gates
 
-Streamable HTTP measurement, provider-reported usage adapters, and A/B agent benchmarking are planned after the stdio core stabilizes.
+Streamable HTTP measurement, provider-reported usage adapters, deeper per-tool attribution, and agent-level A/B benchmarking are planned after the stdio core stabilizes.
 
 ## Install from source
 
@@ -38,7 +42,7 @@ Streamable HTTP measurement, provider-reported usage adapters, and A/B agent ben
 cargo install --path .
 ```
 
-Or during development:
+During development:
 
 ```bash
 cargo run -- --help
@@ -52,21 +56,60 @@ Put MCPMeter in front of any stdio MCP server:
 mcp-meter proxy --trace mcpmeter.jsonl -- your-mcp-server arg1 arg2
 ```
 
-Then point the MCP host at **MCPMeter** instead of directly at the server. MCPMeter launches the real server as its child process and forwards stdin/stdout unchanged.
+Point the MCP host at **MCPMeter** instead of directly at the server. MCPMeter launches the real server as a child process and forwards stdin/stdout unchanged while measurement happens on a separate observer path.
 
-Generate a report:
+Generate a report for the newest run:
 
 ```bash
 mcp-meter report mcpmeter.jsonl
 ```
 
-Machine-readable report:
+List all runs stored in an append-only trace:
+
+```bash
+mcp-meter runs mcpmeter.jsonl
+```
+
+Select one run explicitly:
+
+```bash
+mcp-meter report mcpmeter.jsonl --run-id <RUN_ID>
+```
+
+Compare two traces:
+
+```bash
+mcp-meter compare baseline.jsonl candidate.jsonl
+```
+
+Or compare two runs stored in one trace:
+
+```bash
+mcp-meter compare mcpmeter.jsonl mcpmeter.jsonl \
+  --baseline-run-id <BASELINE_RUN_ID> \
+  --candidate-run-id <CANDIDATE_RUN_ID>
+```
+
+Every reporting command supports machine-readable JSON:
 
 ```bash
 mcp-meter report mcpmeter.jsonl --json
+mcp-meter runs mcpmeter.jsonl --json
+mcp-meter compare baseline.jsonl candidate.jsonl --json
 ```
 
-A trace file may contain multiple runs. `report` selects the newest run by default; use `--run-id` to select a specific run.
+## Yekaterina A/B example
+
+A practical Yekaterina experiment can use two controlled agent runs:
+
+```text
+A: agent → Yekaterina directly
+B: agent → MCPMeter → Yekaterina
+```
+
+For repeated measured sessions, append them to trace files, use `runs` to find exact run ids, then use `compare` to calculate candidate-minus-baseline deltas for serialized MCP tokens, wire bytes, tool calls, errors, schema tokens, exposed tools, and p50/p95/p99 latency.
+
+`compare` rejects token comparisons when baseline and candidate used different tokenizer profiles.
 
 ## Tokenizer profiles
 
@@ -76,11 +119,11 @@ mcp-meter proxy --tokenizer cl100k-base -- your-server
 mcp-meter proxy --tokenizer bytes4-estimate -- your-server
 ```
 
-- `o200k-base`: exact tokenization of the observed serialized payload under the selected `o200k_base` encoding.
-- `cl100k-base`: exact tokenization of the observed serialized payload under `cl100k_base`.
-- `bytes4-estimate`: explicit heuristic (`ceil(UTF-8 bytes / 4)`) for environments where only a rough estimate is wanted.
+- `o200k-base`: tokenization of the observed serialized payload under `o200k_base`.
+- `cl100k-base`: tokenization of the observed serialized payload under `cl100k_base`.
+- `bytes4-estimate`: explicit heuristic (`ceil(UTF-8 bytes / 4)`).
 
-These numbers describe **observed MCP payloads under the selected tokenizer**. They are not automatically the same as billable/model-context tokens because an MCP host may transform, cache, truncate, or reserialize tool definitions and results before sending them to a model.
+These numbers describe **observed MCP payloads under the selected tokenizer**. They are not automatically the same as billable/model-context tokens because an MCP host may transform, cache, truncate, deduplicate, or reserialize tool definitions and results before sending them to a model.
 
 ## Built-in fixture
 
@@ -90,7 +133,7 @@ MCPMeter includes a hidden deterministic fixture server for development and regr
 mcp-meter proxy --tokenizer bytes4-estimate -- mcp-meter fixture
 ```
 
-It exposes `add`, `echo`, and `sleep_ms` tools and understands both modern `server/discover` and the legacy `initialize` flow for compatibility testing.
+It exposes `add`, `echo`, and `sleep_ms` tools and supports modern `server/discover` plus the legacy `initialize` flow for compatibility testing.
 
 ## Example report
 
@@ -121,16 +164,18 @@ Latency max:         5.200 ms
 MCPMeter keeps these concepts separate:
 
 1. **Wire metrics** — exact bytes and message counts observed at the MCP boundary.
-2. **Serialized token metrics** — token count of the exact observed JSON text (excluding the newline transport delimiter) under a named tokenizer.
+2. **Serialized token metrics** — token count of the exact observed JSON text, excluding the newline transport delimiter, under a named tokenizer.
 3. **Schema/catalog metrics** — token count of a canonical compact serialization of the `tools` array returned by `tools/list`.
 4. **Model-context estimates** — future host-aware estimates, always labeled as estimates.
-5. **Provider usage** — future provider-reported usage, only labeled actual when independently supplied by the provider/host.
+5. **Provider usage** — future provider-reported usage, only labeled actual when independently supplied by the provider or host.
+
+See [`docs/TRACE_FORMAT.md`](docs/TRACE_FORMAT.md) for the event schema and exact/derived metric boundary.
 
 ## Why observation is asynchronous
 
-The proxy copies each frame into an observer channel and immediately continues forwarding. Tokenization, hashing, JSON classification, and trace writing happen on the observer thread rather than in the primary forwarding path.
+The proxy captures a boundary timestamp, copies each frame into an observer channel, and continues forwarding. Tokenization, hashing, JSON classification, and trace writing happen on the observer thread rather than the primary forwarding path.
 
-Latency timestamps are captured at the proxy boundary before forwarding and are correlated by JSON-RPC id. This reduces measurement distortion compared with tokenizing synchronously before sending the request onward.
+Request/response latency is correlated by JSON-RPC id using the boundary timestamps, not the later time at which the observer processes the event. This reduces measurement distortion.
 
 ## Safety
 
@@ -144,27 +189,42 @@ Raw capture requires an explicit flag:
 mcp-meter proxy --capture-payloads -- your-server
 ```
 
-Treat resulting traces as sensitive. See [`SECURITY.md`](SECURITY.md).
+Treat resulting traces as sensitive. Even default traces contain metadata such as tool names, timings, sizes, and payload fingerprints. See [`SECURITY.md`](SECURITY.md).
 
 ## Repository map
 
 ```text
 src/
-  main.rs       CLI
-  proxy.rs      stdio forwarding + observer channel
+  main.rs       CLI routing
+  proxy.rs      stdio forwarding + asynchronous observer channel
   observer.rs   JSON-RPC classification/correlation
   tokenizer.rs  tokenizer profiles
   event.rs      durable trace event schema
-  report.rs     aggregation + percentile reporting
-  fixture.rs    deterministic test MCP server
+  report.rs     run aggregation + percentile reporting
+  runs.rs       append-only trace run index
+  compare.rs    baseline/candidate delta engine
+  fixture.rs    deterministic MCP fixture server
 
 tests/
   proxy_smoke.rs
+  cli_workflow.rs
 
 docs/
   ARCHITECTURE.md
   ROADMAP.md
+  TRACE_FORMAT.md
 ```
+
+## Development
+
+```bash
+cargo check --all-targets --all-features
+cargo test --all-targets --all-features
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all -- --check
+```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Design principles
 
@@ -173,7 +233,7 @@ docs/
 3. **Local first.** Captured traffic can be highly sensitive.
 4. **Safe logs by default.** Raw arguments/results are opt-in only.
 5. **Transport aware.** stdio first; HTTP later without redefining metric semantics.
-6. **Comparable runs.** Output is designed for later A/B agent comparisons.
+6. **Comparable runs.** Baseline/candidate output is a first-class feature.
 7. **Single-purpose core.** MCPMeter measures; it is not an MCP orchestration framework.
 
 ## License
