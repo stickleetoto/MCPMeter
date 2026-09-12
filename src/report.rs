@@ -146,10 +146,17 @@ pub fn print_text(report: &RunReport) {
     println!(
         "Tokenizer:           {}{}",
         report.tokenizer,
-        if report.token_count_estimated { " (estimated)" } else { "" }
+        if report.token_count_estimated {
+            " (estimated)"
+        } else {
+            ""
+        }
     );
     println!("Messages:            {}", report.messages);
-    println!("Requests/responses:  {} / {}", report.requests, report.responses);
+    println!(
+        "Requests/responses:  {} / {}",
+        report.requests, report.responses
+    );
     println!("Notifications:       {}", report.notifications);
     println!("Tool calls:          {}", report.tool_calls);
     println!("Unique tools called: {}", report.unique_tools.len());
@@ -169,16 +176,24 @@ pub fn print_text(report: &RunReport) {
     println!("Wire bytes total:    {}", report.wire_bytes_total);
     println!(
         "Tokens C→S/S→C:      {} / {}",
-        report.serialized_tokens_client_to_server,
-        report.serialized_tokens_server_to_client
+        report.serialized_tokens_client_to_server, report.serialized_tokens_server_to_client
     );
     println!("Serialized tokens:   {}", report.serialized_tokens_total);
     println!("Error events:        {}", report.error_events);
     if let Some(p50) = report.latency_p50_ms {
         println!("Latency p50:         {p50:.3} ms");
-        println!("Latency p95:         {:.3} ms", report.latency_p95_ms.unwrap_or(p50));
-        println!("Latency p99:         {:.3} ms", report.latency_p99_ms.unwrap_or(p50));
-        println!("Latency max:         {:.3} ms", report.latency_max_ms.unwrap_or(p50));
+        println!(
+            "Latency p95:         {:.3} ms",
+            report.latency_p95_ms.unwrap_or(p50)
+        );
+        println!(
+            "Latency p99:         {:.3} ms",
+            report.latency_p99_ms.unwrap_or(p50)
+        );
+        println!(
+            "Latency max:         {:.3} ms",
+            report.latency_max_ms.unwrap_or(p50)
+        );
     } else {
         println!("Latency:             no correlated samples");
     }
