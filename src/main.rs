@@ -4,6 +4,7 @@ mod fixture;
 mod observer;
 mod proxy;
 mod report;
+mod runs;
 mod tokenizer;
 
 use anyhow::Result;
@@ -51,6 +52,16 @@ enum Commands {
         /// Report a specific run id instead of the most recent run.
         #[arg(long)]
         run_id: Option<String>,
+
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// List runs stored in a JSONL trace, newest first.
+    Runs {
+        /// JSONL trace produced by `mcp-meter proxy`.
+        trace: PathBuf,
 
         /// Emit machine-readable JSON.
         #[arg(long)]
@@ -114,6 +125,14 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 report::print_text(&report);
+            }
+        }
+        Commands::Runs { trace, json } => {
+            let runs = runs::list_runs(&trace)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&runs)?);
+            } else {
+                runs::print_text(&runs);
             }
         }
         Commands::Compare {
