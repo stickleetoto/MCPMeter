@@ -22,7 +22,7 @@ Goal: produce trustworthy measurements for a stdio MCP server with minimal behav
 ### P1
 
 - [x] p50 / p95 / p99 / max latency report
-- [ ] per-tool cost breakdown with explicit batch-attribution semantics
+- [x] per-tool cost breakdown with explicit batch-attribution semantics
 - [x] run metadata and stable run selection
 - [x] `runs` command for append-only trace navigation
 - [x] tokenizer/profile metadata in every event
@@ -35,8 +35,8 @@ Goal: produce trustworthy measurements for a stdio MCP server with minimal behav
 
 - [ ] Streamable HTTP transport support
 - [x] baseline vs candidate run comparison (landed early in v0.1)
+- [x] per-tool cost report (landed early in v0.1)
 - [ ] schema-cost comparison across MCP servers
-- [ ] per-tool cost report
 - [ ] HTML report
 - [ ] CSV export
 - [ ] configurable redaction rules
