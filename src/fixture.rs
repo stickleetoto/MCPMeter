@@ -51,12 +51,7 @@ pub fn run() -> Result<()> {
 fn handle_message(message: &Value) -> Option<Value> {
     let object = message.as_object()?;
     let method = object.get("method")?.as_str()?;
-    let id = object.get("id").cloned();
-
-    if id.is_none() {
-        return None;
-    }
-    let id = id.unwrap();
+    let id = object.get("id").cloned()?;
 
     let result = match method {
         "server/discover" => json!({
@@ -133,7 +128,10 @@ fn handle_message(message: &Value) -> Option<Value> {
         "tools/call" => {
             let params = object.get("params").cloned().unwrap_or_else(|| json!({}));
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let arguments = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             return Some(tool_response(id, name, &arguments));
         }
         _ => {
