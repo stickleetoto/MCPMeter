@@ -1,6 +1,7 @@
 use crate::event::MeasurementEvent;
 use anyhow::{Context, Result};
 use serde::Serialize;
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -103,7 +104,7 @@ fn aggregate_runs(events: &[MeasurementEvent]) -> Vec<RunIndexEntry> {
     }
 
     let mut result: Vec<RunIndexEntry> = runs.into_values().collect();
-    result.sort_by(|a, b| b.last_ts_unix_ns.cmp(&a.last_ts_unix_ns));
+    result.sort_by_key(|entry| Reverse(entry.last_ts_unix_ns));
     result
 }
 
