@@ -35,12 +35,9 @@ fn proxy_records_tools_list_and_call() {
     let stdout = child.stdout.take().expect("proxy stdout");
     let mut reader = BufReader::new(stdout);
 
-    writeln!(
-        stdin,
-        "{}",
-        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#
-    )
-    .unwrap();
+    stdin
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}\n")
+        .unwrap();
     stdin.flush().unwrap();
 
     let mut line = String::new();
@@ -49,12 +46,9 @@ fn proxy_records_tools_list_and_call() {
     assert_eq!(response["id"], 1);
     assert_eq!(response["result"]["tools"].as_array().unwrap().len(), 3);
 
-    writeln!(
-        stdin,
-        "{}",
-        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"add","arguments":{"a":20,"b":22}}}"#
-    )
-    .unwrap();
+    stdin
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"add\",\"arguments\":{\"a\":20,\"b\":22}}}\n")
+        .unwrap();
     stdin.flush().unwrap();
 
     line.clear();
@@ -72,11 +66,17 @@ fn proxy_records_tools_list_and_call() {
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
 
-    assert!(events.iter().any(|event| event["kind"] == "tools_list_response"));
-    assert!(events.iter().any(|event| event["kind"] == "tools_call_response"));
+    assert!(events
+        .iter()
+        .any(|event| event["kind"] == "tools_list_response"));
+    assert!(events
+        .iter()
+        .any(|event| event["kind"] == "tools_call_response"));
     assert!(events.iter().any(|event| event["tools_exposed"] == 3));
     assert!(events.iter().any(|event| event["tool_call_count"] == 1));
-    assert!(events.iter().all(|event| event.get("raw_payload").is_none()));
+    assert!(events
+        .iter()
+        .all(|event| event.get("raw_payload").is_none()));
 
     let _ = fs::remove_file(trace);
 }
