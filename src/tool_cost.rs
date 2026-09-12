@@ -82,9 +82,7 @@ pub fn build_tool_cost(path: &Path, requested_run: Option<&str>) -> Result<ToolC
                     unattributed_batch_response_tokens += event.serialized_tokens;
                     unattributed_batch_response_wire_bytes += event.wire_bytes;
                 } else if event.kind == "tools_call_response" {
-                    let accumulator = accumulators
-                        .entry(event.tools[0].clone())
-                        .or_default();
+                    let accumulator = accumulators.entry(event.tools[0].clone()).or_default();
                     accumulator.response_tokens += event.serialized_tokens;
                     accumulator.response_wire_bytes += event.wire_bytes;
                     accumulator.error_responses += u64::from(!event.ok);
@@ -260,9 +258,7 @@ mod tests {
                         unattributed_batch_request_tokens += event.serialized_tokens;
                         unattributed_batch_request_wire_bytes += event.wire_bytes;
                     } else {
-                        let accumulator = accumulators
-                            .entry(event.tools[0].clone())
-                            .or_default();
+                        let accumulator = accumulators.entry(event.tools[0].clone()).or_default();
                         accumulator.calls += event.tool_call_count;
                         accumulator.request_tokens += event.serialized_tokens;
                         accumulator.request_wire_bytes += event.wire_bytes;
@@ -273,12 +269,12 @@ mod tests {
                         unattributed_batch_response_tokens += event.serialized_tokens;
                         unattributed_batch_response_wire_bytes += event.wire_bytes;
                     } else if event.kind == "tools_call_response" {
-                        let accumulator = accumulators
-                            .entry(event.tools[0].clone())
-                            .or_default();
+                        let accumulator = accumulators.entry(event.tools[0].clone()).or_default();
                         accumulator.response_tokens += event.serialized_tokens;
                         accumulator.response_wire_bytes += event.wire_bytes;
-                        accumulator.latencies_us.extend(event.latencies_us.iter().copied());
+                        accumulator
+                            .latencies_us
+                            .extend(event.latencies_us.iter().copied());
                     }
                 }
                 _ => {}
@@ -323,8 +319,22 @@ mod tests {
     #[test]
     fn attributes_non_batch_request_and_response_to_tool() {
         let events = vec![
-            event(Direction::ClientToServer, "tools_call_request", &["add"], 1, 10, 40),
-            event(Direction::ServerToClient, "tools_call_response", &["add"], 0, 6, 24),
+            event(
+                Direction::ClientToServer,
+                "tools_call_request",
+                &["add"],
+                1,
+                10,
+                40,
+            ),
+            event(
+                Direction::ServerToClient,
+                "tools_call_response",
+                &["add"],
+                0,
+                6,
+                24,
+            ),
         ];
         let summary = summarize(&events);
         let add = &summary.tools[0];
