@@ -24,17 +24,19 @@ Current features:
 - `tools/call` counting and tool-name attribution
 - request/response correlation by JSON-RPC id
 - boundary-to-boundary latency samples with p50/p95/p99/max reporting
+- per-tool request/response token, wire-byte, error, and latency costs
+- truthful batch accounting: shared batch payload cost is reported as unattributed instead of being guessed per tool
 - JSON-RPC batch observation
 - append-friendly, versioned JSONL traces
 - SHA-256 payload fingerprints
 - raw payload persistence **off by default**
-- `report`, `runs`, and baseline/candidate `compare` commands
+- `report`, `tools`, `runs`, and baseline/candidate `compare` commands
 - text and machine-readable JSON output
 - deterministic built-in MCP fixture server
-- unit and end-to-end CLI/proxy regression tests
+- unit and end-to-end CLI/proxy/error-path regression tests
 - Linux and Windows CI quality gates
 
-Streamable HTTP measurement, provider-reported usage adapters, deeper per-tool attribution, and agent-level A/B benchmarking are planned after the stdio core stabilizes.
+Streamable HTTP measurement, provider-reported usage adapters, deeper agent benchmarking, and richer exports are planned after the stdio core stabilizes.
 
 ## Install from source
 
@@ -64,6 +66,12 @@ Generate a report for the newest run:
 mcp-meter report mcpmeter.jsonl
 ```
 
+Show cost by individual tool:
+
+```bash
+mcp-meter tools mcpmeter.jsonl
+```
+
 List all runs stored in an append-only trace:
 
 ```bash
@@ -74,6 +82,7 @@ Select one run explicitly:
 
 ```bash
 mcp-meter report mcpmeter.jsonl --run-id <RUN_ID>
+mcp-meter tools mcpmeter.jsonl --run-id <RUN_ID>
 ```
 
 Compare two traces:
@@ -94,22 +103,40 @@ Every reporting command supports machine-readable JSON:
 
 ```bash
 mcp-meter report mcpmeter.jsonl --json
+mcp-meter tools mcpmeter.jsonl --json
 mcp-meter runs mcpmeter.jsonl --json
 mcp-meter compare baseline.jsonl candidate.jsonl --json
 ```
 
 ## Yekaterina A/B example
 
-A practical Yekaterina experiment can use two controlled agent runs:
+A practical Yekaterina experiment can use controlled agent runs with MCPMeter inserted in front of Yekaterina:
 
 ```text
-A: agent → Yekaterina directly
-B: agent → MCPMeter → Yekaterina
+Agent / Codex / GPT
+        │
+        ▼
+     MCPMeter
+        │
+        ▼
+    Yekaterina
 ```
 
-For repeated measured sessions, append them to trace files, use `runs` to find exact run ids, then use `compare` to calculate candidate-minus-baseline deltas for serialized MCP tokens, wire bytes, tool calls, errors, schema tokens, exposed tools, and p50/p95/p99 latency.
+Run the same task under controlled conditions, append each measured session to a trace, use `runs` to identify exact run ids, use `tools` to see which Yekaterina tools consumed the traffic, and use `compare` to calculate candidate-minus-baseline deltas for serialized MCP tokens, wire bytes, tool calls, errors, schema tokens, exposed tools, and p50/p95/p99 latency.
 
 `compare` rejects token comparisons when baseline and candidate used different tokenizer profiles.
+
+## Per-tool accounting
+
+For a normal, non-batched `tools/call`, MCPMeter attributes the observed request and correlated response cost to that tool:
+
+```text
+Tool            Calls   Req tok   Resp tok   Total tok    p95 ms   Errors
+---------------------------------------------------------------------------
+yk.compute         14      1102       3481        4583      4.800        0
+```
+
+For a JSON-RPC batch containing multiple tools, the serialized batch frame has shared syntax and framing. MCPMeter therefore **does not invent a per-tool token split**. Tool call counts are retained, while the shared payload cost is surfaced separately as `unattributed_batch_request_tokens`, `unattributed_batch_response_tokens`, and matching wire-byte fields.
 
 ## Tokenizer profiles
 
@@ -200,7 +227,9 @@ src/
   observer.rs   JSON-RPC classification/correlation
   tokenizer.rs  tokenizer profiles
   event.rs      durable trace event schema
+  trace.rs      shared JSONL reader + run selection
   report.rs     run aggregation + percentile reporting
+  tool_cost.rs  per-tool cost attribution
   runs.rs       append-only trace run index
   compare.rs    baseline/candidate delta engine
   fixture.rs    deterministic MCP fixture server
@@ -208,6 +237,7 @@ src/
 tests/
   proxy_smoke.rs
   cli_workflow.rs
+  error_paths.rs
 
 docs/
   ARCHITECTURE.md
