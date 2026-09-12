@@ -20,9 +20,12 @@ The project follows semantic versioning once a release is tagged.
 - Append-friendly JSONL trace format with schema versioning.
 - SHA-256 payload fingerprints with raw payload persistence disabled by default.
 - `report` command with text and JSON output.
+- `tools` command with per-tool call, token, wire-byte, error, and latency costs.
+- Truthful batch accounting that leaves shared batch payload cost unattributed instead of inventing per-tool splits.
 - `runs` command for append-only trace navigation.
 - `compare` command for baseline/candidate A/B measurement with tokenizer compatibility checks.
+- Shared trace reader and explicit run-selection utility used by reports and per-tool analysis.
 - Deterministic fixture MCP server with `add`, `echo`, and `sleep_ms` tools.
-- Unit tests plus end-to-end stdio proxy and CLI workflow tests.
+- Unit tests plus end-to-end stdio proxy, error-path, per-tool, and CLI workflow tests.
 - Linux and Windows CI quality gates.
 - Security, architecture, roadmap, trace-format, and contribution documentation.
