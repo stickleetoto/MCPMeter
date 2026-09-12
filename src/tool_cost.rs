@@ -1,0 +1,355 @@
+use crate::event::Direction;
+use crate::trace::{read_events, select_run};
+use anyhow::{bail, Result};
+use serde::Serialize;
+use std::collections::BTreeMap;
+use std::path::Path;
+
+#[derive(Debug, Serialize)]
+pub struct ToolCostSummary {
+    pub run_id: String,
+    pub tokenizer: String,
+    pub token_count_estimated: bool,
+    pub tools: Vec<ToolCost>,
+    pub unattributed_batch_request_tokens: u64,
+    pub unattributed_batch_response_tokens: u64,
+    pub unattributed_batch_request_wire_bytes: u64,
+    pub unattributed_batch_response_wire_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ToolCost {
+    pub tool: String,
+    pub calls: u64,
+    pub request_tokens: u64,
+    pub response_tokens: u64,
+    pub total_tokens: u64,
+    pub request_wire_bytes: u64,
+    pub response_wire_bytes: u64,
+    pub total_wire_bytes: u64,
+    pub error_responses: u64,
+    pub latency_samples: u64,
+    pub latency_p50_ms: Option<f64>,
+    pub latency_p95_ms: Option<f64>,
+    pub latency_p99_ms: Option<f64>,
+}
+
+#[derive(Default)]
+struct ToolAccumulator {
+    calls: u64,
+    request_tokens: u64,
+    response_tokens: u64,
+    request_wire_bytes: u64,
+    response_wire_bytes: u64,
+    error_responses: u64,
+    latencies_us: Vec<u64>,
+}
+
+pub fn build_tool_cost(path: &Path, requested_run: Option<&str>) -> Result<ToolCostSummary> {
+    let events = read_events(path)?;
+    let (run_id, selected) = select_run(&events, requested_run)?;
+    let tokenizer = selected[0].tokenizer.clone();
+
+    if selected.iter().any(|event| event.tokenizer != tokenizer) {
+        bail!("run contains mixed tokenizer profiles: {run_id}");
+    }
+
+    let token_count_estimated = selected.iter().any(|event| event.token_count_estimated);
+    let mut accumulators: BTreeMap<String, ToolAccumulator> = BTreeMap::new();
+    let mut unattributed_batch_request_tokens = 0;
+    let mut unattributed_batch_response_tokens = 0;
+    let mut unattributed_batch_request_wire_bytes = 0;
+    let mut unattributed_batch_response_wire_bytes = 0;
+
+    for event in selected {
+        match event.direction {
+            Direction::ClientToServer if event.tool_call_count > 0 => {
+                if event.kind == "batch" || event.tools.len() != 1 {
+                    for tool in &event.tools {
+                        accumulators.entry(tool.clone()).or_default().calls += 1;
+                    }
+                    unattributed_batch_request_tokens += event.serialized_tokens;
+                    unattributed_batch_request_wire_bytes += event.wire_bytes;
+                } else if let Some(tool) = event.tools.first() {
+                    let accumulator = accumulators.entry(tool.clone()).or_default();
+                    accumulator.calls += event.tool_call_count;
+                    accumulator.request_tokens += event.serialized_tokens;
+                    accumulator.request_wire_bytes += event.wire_bytes;
+                }
+            }
+            Direction::ServerToClient if !event.tools.is_empty() => {
+                if event.kind == "batch" || event.tools.len() != 1 {
+                    unattributed_batch_response_tokens += event.serialized_tokens;
+                    unattributed_batch_response_wire_bytes += event.wire_bytes;
+                } else if event.kind == "tools_call_response" {
+                    let accumulator = accumulators
+                        .entry(event.tools[0].clone())
+                        .or_default();
+                    accumulator.response_tokens += event.serialized_tokens;
+                    accumulator.response_wire_bytes += event.wire_bytes;
+                    accumulator.error_responses += u64::from(!event.ok);
+                    accumulator
+                        .latencies_us
+                        .extend(event.latencies_us.iter().copied());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let tools = accumulators
+        .into_iter()
+        .map(|(tool, mut accumulator)| {
+            accumulator.latencies_us.sort_unstable();
+            ToolCost {
+                tool,
+                calls: accumulator.calls,
+                request_tokens: accumulator.request_tokens,
+                response_tokens: accumulator.response_tokens,
+                total_tokens: accumulator.request_tokens + accumulator.response_tokens,
+                request_wire_bytes: accumulator.request_wire_bytes,
+                response_wire_bytes: accumulator.response_wire_bytes,
+                total_wire_bytes: accumulator.request_wire_bytes + accumulator.response_wire_bytes,
+                error_responses: accumulator.error_responses,
+                latency_samples: accumulator.latencies_us.len() as u64,
+                latency_p50_ms: percentile_ms(&accumulator.latencies_us, 0.50),
+                latency_p95_ms: percentile_ms(&accumulator.latencies_us, 0.95),
+                latency_p99_ms: percentile_ms(&accumulator.latencies_us, 0.99),
+            }
+        })
+        .collect();
+
+    Ok(ToolCostSummary {
+        run_id,
+        tokenizer,
+        token_count_estimated,
+        tools,
+        unattributed_batch_request_tokens,
+        unattributed_batch_response_tokens,
+        unattributed_batch_request_wire_bytes,
+        unattributed_batch_response_wire_bytes,
+    })
+}
+
+pub fn print_text(summary: &ToolCostSummary) {
+    println!("Run:       {}", summary.run_id);
+    println!(
+        "Tokenizer: {}{}",
+        summary.tokenizer,
+        if summary.token_count_estimated {
+            " (estimated)"
+        } else {
+            ""
+        }
+    );
+    println!();
+
+    if summary.tools.is_empty() {
+        println!("No tool calls found.");
+    } else {
+        println!(
+            "{:<28} {:>7} {:>11} {:>11} {:>11} {:>10} {:>8}",
+            "Tool", "Calls", "Req tok", "Resp tok", "Total tok", "p95 ms", "Errors"
+        );
+        println!("{}", "-".repeat(94));
+        for tool in &summary.tools {
+            println!(
+                "{:<28} {:>7} {:>11} {:>11} {:>11} {:>10} {:>8}",
+                tool.tool,
+                tool.calls,
+                tool.request_tokens,
+                tool.response_tokens,
+                tool.total_tokens,
+                optional_ms(tool.latency_p95_ms),
+                tool.error_responses
+            );
+        }
+    }
+
+    if summary.unattributed_batch_request_tokens > 0
+        || summary.unattributed_batch_response_tokens > 0
+    {
+        println!();
+        println!("Batch payload cost not attributed to individual tools:");
+        println!(
+            "  request:  {} tokens / {} wire bytes",
+            summary.unattributed_batch_request_tokens,
+            summary.unattributed_batch_request_wire_bytes
+        );
+        println!(
+            "  response: {} tokens / {} wire bytes",
+            summary.unattributed_batch_response_tokens,
+            summary.unattributed_batch_response_wire_bytes
+        );
+    }
+}
+
+fn optional_ms(value: Option<f64>) -> String {
+    value
+        .map(|milliseconds| format!("{milliseconds:.3}"))
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
+fn percentile_ms(sorted_us: &[u64], percentile: f64) -> Option<f64> {
+    if sorted_us.is_empty() {
+        return None;
+    }
+    let rank = (percentile * sorted_us.len() as f64).ceil() as usize;
+    let index = rank.saturating_sub(1).min(sorted_us.len() - 1);
+    Some(sorted_us[index] as f64 / 1000.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::MeasurementEvent;
+
+    fn event(
+        direction: Direction,
+        kind: &str,
+        tools: &[&str],
+        tool_call_count: u64,
+        tokens: u64,
+        wire_bytes: u64,
+    ) -> MeasurementEvent {
+        MeasurementEvent {
+            schema_version: 1,
+            run_id: "run".to_string(),
+            ts_unix_ns: 1,
+            direction,
+            kind: kind.to_string(),
+            wire_bytes,
+            serialized_tokens: tokens,
+            tokenizer: "o200k_base".to_string(),
+            token_count_estimated: false,
+            payload_sha256: "00".repeat(32),
+            raw_payload: None,
+            methods: Vec::new(),
+            tools: tools.iter().map(|tool| (*tool).to_string()).collect(),
+            request_count: u64::from(matches!(direction, Direction::ClientToServer)),
+            response_count: u64::from(matches!(direction, Direction::ServerToClient)),
+            notification_count: 0,
+            tool_call_count,
+            tools_exposed: None,
+            schema_tokens: None,
+            latencies_us: if matches!(direction, Direction::ServerToClient) {
+                vec![2_000]
+            } else {
+                Vec::new()
+            },
+            ok: true,
+            parse_error: None,
+        }
+    }
+
+    fn summarize(events: &[MeasurementEvent]) -> ToolCostSummary {
+        let tokenizer = events[0].tokenizer.clone();
+        let mut accumulators: BTreeMap<String, ToolAccumulator> = BTreeMap::new();
+        let mut unattributed_batch_request_tokens = 0;
+        let mut unattributed_batch_response_tokens = 0;
+        let mut unattributed_batch_request_wire_bytes = 0;
+        let mut unattributed_batch_response_wire_bytes = 0;
+
+        for event in events {
+            match event.direction {
+                Direction::ClientToServer if event.tool_call_count > 0 => {
+                    if event.kind == "batch" || event.tools.len() != 1 {
+                        for tool in &event.tools {
+                            accumulators.entry(tool.clone()).or_default().calls += 1;
+                        }
+                        unattributed_batch_request_tokens += event.serialized_tokens;
+                        unattributed_batch_request_wire_bytes += event.wire_bytes;
+                    } else {
+                        let accumulator = accumulators
+                            .entry(event.tools[0].clone())
+                            .or_default();
+                        accumulator.calls += event.tool_call_count;
+                        accumulator.request_tokens += event.serialized_tokens;
+                        accumulator.request_wire_bytes += event.wire_bytes;
+                    }
+                }
+                Direction::ServerToClient if !event.tools.is_empty() => {
+                    if event.kind == "batch" || event.tools.len() != 1 {
+                        unattributed_batch_response_tokens += event.serialized_tokens;
+                        unattributed_batch_response_wire_bytes += event.wire_bytes;
+                    } else if event.kind == "tools_call_response" {
+                        let accumulator = accumulators
+                            .entry(event.tools[0].clone())
+                            .or_default();
+                        accumulator.response_tokens += event.serialized_tokens;
+                        accumulator.response_wire_bytes += event.wire_bytes;
+                        accumulator.latencies_us.extend(event.latencies_us.iter().copied());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let tools = accumulators
+            .into_iter()
+            .map(|(tool, mut accumulator)| {
+                accumulator.latencies_us.sort_unstable();
+                ToolCost {
+                    tool,
+                    calls: accumulator.calls,
+                    request_tokens: accumulator.request_tokens,
+                    response_tokens: accumulator.response_tokens,
+                    total_tokens: accumulator.request_tokens + accumulator.response_tokens,
+                    request_wire_bytes: accumulator.request_wire_bytes,
+                    response_wire_bytes: accumulator.response_wire_bytes,
+                    total_wire_bytes: accumulator.request_wire_bytes
+                        + accumulator.response_wire_bytes,
+                    error_responses: accumulator.error_responses,
+                    latency_samples: accumulator.latencies_us.len() as u64,
+                    latency_p50_ms: percentile_ms(&accumulator.latencies_us, 0.50),
+                    latency_p95_ms: percentile_ms(&accumulator.latencies_us, 0.95),
+                    latency_p99_ms: percentile_ms(&accumulator.latencies_us, 0.99),
+                }
+            })
+            .collect();
+
+        ToolCostSummary {
+            run_id: "run".to_string(),
+            tokenizer,
+            token_count_estimated: false,
+            tools,
+            unattributed_batch_request_tokens,
+            unattributed_batch_response_tokens,
+            unattributed_batch_request_wire_bytes,
+            unattributed_batch_response_wire_bytes,
+        }
+    }
+
+    #[test]
+    fn attributes_non_batch_request_and_response_to_tool() {
+        let events = vec![
+            event(Direction::ClientToServer, "tools_call_request", &["add"], 1, 10, 40),
+            event(Direction::ServerToClient, "tools_call_response", &["add"], 0, 6, 24),
+        ];
+        let summary = summarize(&events);
+        let add = &summary.tools[0];
+        assert_eq!(add.tool, "add");
+        assert_eq!(add.calls, 1);
+        assert_eq!(add.total_tokens, 16);
+        assert_eq!(add.total_wire_bytes, 64);
+        assert_eq!(add.latency_p95_ms, Some(2.0));
+    }
+
+    #[test]
+    fn batch_tokens_remain_unattributed() {
+        let events = vec![event(
+            Direction::ClientToServer,
+            "batch",
+            &["a", "b"],
+            2,
+            100,
+            400,
+        )];
+        let summary = summarize(&events);
+        assert_eq!(summary.tools.len(), 2);
+        assert_eq!(summary.tools[0].calls, 1);
+        assert_eq!(summary.tools[1].calls, 1);
+        assert_eq!(summary.unattributed_batch_request_tokens, 100);
+        assert_eq!(summary.tools[0].request_tokens, 0);
+    }
+}
