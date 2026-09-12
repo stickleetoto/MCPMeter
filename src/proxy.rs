@@ -78,8 +78,14 @@ pub fn run(config: ProxyConfig) -> Result<i32> {
         .spawn()
         .with_context(|| format!("failed to spawn MCP server: {}", config.command.join(" ")))?;
 
-    let mut child_stdin = child.stdin.take().context("failed to capture child stdin")?;
-    let child_stdout = child.stdout.take().context("failed to capture child stdout")?;
+    let mut child_stdin = child
+        .stdin
+        .take()
+        .context("failed to capture child stdin")?;
+    let child_stdout = child
+        .stdout
+        .take()
+        .context("failed to capture child stdout")?;
 
     let client_observer_tx = observer_tx.clone();
     let client_thread = thread::spawn(move || -> Result<()> {
@@ -153,10 +159,7 @@ pub fn run(config: ProxyConfig) -> Result<i32> {
         Err(error) => eprintln!("MCPMeter warning: observer thread panicked: {error:?}"),
     }
 
-    eprintln!(
-        "MCPMeter run {run_id} -> {}",
-        config.trace_path.display()
-    );
+    eprintln!("MCPMeter run {run_id} -> {}", config.trace_path.display());
 
     Ok(status.code().unwrap_or(1))
 }
