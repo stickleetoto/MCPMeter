@@ -1,5 +1,6 @@
 mod compare;
 mod event;
+mod export;
 mod fixture;
 mod observer;
 mod proxy;
@@ -58,6 +59,24 @@ enum Commands {
         /// Emit machine-readable JSON.
         #[arg(long)]
         json: bool,
+    },
+
+    /// Export a run report as a standalone HTML page or CSV file.
+    Export {
+        /// JSONL trace produced by `mcp-meter proxy`.
+        trace: PathBuf,
+
+        /// Export format: html or csv.
+        #[arg(long)]
+        format: String,
+
+        /// Destination file path.
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Export a specific run id instead of the most recent run.
+        #[arg(long)]
+        run_id: Option<String>,
     },
 
     /// Show per-tool token, wire, error, and latency costs.
@@ -142,6 +161,17 @@ fn main() -> Result<()> {
             } else {
                 report::print_text(&report);
             }
+        }
+        Commands::Export {
+            trace,
+            format,
+            output,
+            run_id,
+        } => {
+            let report = report::build_report(&trace, run_id.as_deref())?;
+            let format = export::ExportFormat::parse(&format)?;
+            export::write_report(&report, format, &output)?;
+            eprintln!("MCPMeter report -> {}", output.display());
         }
         Commands::Tools {
             trace,
