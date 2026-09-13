@@ -220,7 +220,7 @@ fn optional_f64_row(out: &mut String, key: &str, value: Option<f64>) {
 }
 
 fn csv_escape(value: &str) -> String {
-    if value.contains([',', '"', '\n', '\r']) {
+    if value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
         value.to_string()
