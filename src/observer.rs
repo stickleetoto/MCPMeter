@@ -1,4 +1,4 @@
-use crate::event::{Direction, MeasurementEvent};
+use crate::event::{Direction, MeasurementEvent, TransportKind};
 use crate::tokenizer::TokenizerProfile;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -105,9 +105,10 @@ pub fn observe_payload_at(
     let kind = classify_kind(root_is_batch, parse_error.is_some(), &facts);
 
     MeasurementEvent {
-        schema_version: 1,
+        schema_version: 2,
         run_id: run_id.to_string(),
         ts_unix_ns,
+        transport: TransportKind::Stdio,
         direction,
         kind,
         wire_bytes: payload.len() as u64,

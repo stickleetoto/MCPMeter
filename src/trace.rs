@@ -49,13 +49,14 @@ pub fn select_run<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::Direction;
+    use crate::event::{Direction, TransportKind};
 
     fn event(run_id: &str, ts: u128) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 1,
+            schema_version: 2,
             run_id: run_id.to_string(),
             ts_unix_ns: ts,
+            transport: TransportKind::Stdio,
             direction: Direction::ClientToServer,
             kind: "request".to_string(),
             wire_bytes: 1,
@@ -76,6 +77,26 @@ mod tests {
             ok: true,
             parse_error: None,
         }
+    }
+
+    #[test]
+    fn v1_event_without_transport_defaults_to_stdio() {
+        let current = event("legacy", 1);
+        let mut value = serde_json::to_value(current).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("transport");
+        object.insert("schema_version".to_string(), serde_json::json!(1));
+
+        let parsed: MeasurementEvent = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.schema_version, 1);
+        assert_eq!(parsed.transport, TransportKind::Stdio);
+    }
+
+    #[test]
+    fn serialized_v2_event_names_stdio_transport() {
+        let value = serde_json::to_value(event("current", 1)).unwrap();
+        assert_eq!(value["schema_version"], serde_json::json!(2));
+        assert_eq!(value["transport"], serde_json::json!("stdio"));
     }
 
     #[test]
