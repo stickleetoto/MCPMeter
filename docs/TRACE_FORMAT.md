@@ -1,8 +1,8 @@
 # MCPMeter trace format
 
-MCPMeter writes one JSON object per observed stdio frame. Files are append-friendly JSON Lines (`.jsonl`).
+MCPMeter writes append-friendly JSON Lines (`.jsonl`) traces.
 
-The current event schema version is **1**.
+The current event schema version is **1** and describes observed **stdio frames**. Streamable HTTP support is being designed separately so that HTTP application payload sizes are not mislabeled as stdio-style wire bytes.
 
 ## Event fields
 
@@ -13,8 +13,8 @@ The current event schema version is **1**.
 | `ts_unix_ns` | integer | Wall-clock observation timestamp in Unix nanoseconds. |
 | `direction` | string | `client_to_server` or `server_to_client`. |
 | `kind` | string | Best-effort JSON-RPC classification such as `tools_call_request`, `tools_call_response`, `tools_list_request`, `tools_list_response`, `notification`, `batch`, or `malformed`. |
-| `wire_bytes` | integer | Exact bytes in the observed stdio frame, including its newline transport delimiter when present. |
-| `serialized_tokens` | integer | Token count for the observed UTF-8 payload after removing the transport newline, using the selected tokenizer profile. |
+| `wire_bytes` | integer | Exact bytes in the observed **stdio frame**, including its newline transport delimiter when present. This field's v1 meaning must not be reused for HTTP body bytes. |
+| `serialized_tokens` | integer | Token count for the observed UTF-8 payload after removing the stdio transport newline, using the selected tokenizer profile. |
 | `tokenizer` | string | Tokenizer profile used for `serialized_tokens`. |
 | `token_count_estimated` | boolean | `true` when the tokenizer profile itself is heuristic. |
 | `payload_sha256` | string | SHA-256 fingerprint of the complete observed frame. |
@@ -27,7 +27,7 @@ The current event schema version is **1**.
 | `tool_call_count` | integer | Number of `tools/call` requests observed in the frame. |
 | `tools_exposed` | integer, optional | Number of tools returned by a correlated `tools/list` response. |
 | `schema_tokens` | integer, optional | Token count of a canonical compact serialization of the returned `tools` array. |
-| `latencies_us` | array | Correlated request-to-response boundary latencies in microseconds. Batch frames can contain multiple samples. |
+| `latencies_us` | array | Correlated request-to-response stdio-boundary latencies in microseconds. Batch frames can contain multiple samples. |
 | `ok` | boolean | `false` for malformed frames and JSON-RPC error responses. |
 | `parse_error` | string, optional | Parse error detail when the observed payload is malformed. |
 
@@ -58,12 +58,24 @@ MCPMeter intentionally keeps unlike quantities separate.
 - provider billing tokens
 - hidden model/system tokens
 - host-side caching, truncation, deduplication, or schema transformation
+- HTTP/TLS/network framing bytes
 
-Those quantities must not be inferred from `serialized_tokens` without a host/provider-specific adapter.
+Those quantities must not be inferred from `serialized_tokens` or `wire_bytes` without an independently defined adapter or observation layer.
+
+## Streamable HTTP schema rule
+
+The HTTP trace extension must name its byte and timing boundaries explicitly. In particular:
+
+- HTTP body/SSE payload bytes are application-boundary bytes, not automatically network wire bytes;
+- response headers, first body byte, complete JSON body, SSE message events, and stream close are distinct timing boundaries;
+- sensitive headers and `Mcp-Param-*` values are not persisted by default;
+- long-lived streams are observed incrementally and are never buffered solely to produce a trace.
+
+See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md).
 
 ## Run boundaries
 
-A new `run_id` is generated each time `mcp-meter proxy` starts. Multiple runs may be appended to one JSONL file.
+A new `run_id` is generated each time a proxy run starts. Multiple runs may be appended to one JSONL file.
 
 Use:
 
