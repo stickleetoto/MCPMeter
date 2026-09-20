@@ -15,7 +15,8 @@ pub struct RunIndexEntry {
     pub first_ts_unix_ns: u128,
     pub last_ts_unix_ns: u128,
     pub messages: u64,
-    pub wire_bytes: u64,
+    pub wire_bytes: Option<u64>,
+    pub payload_bytes: Option<u64>,
     pub serialized_tokens: u64,
     pub tool_calls: u64,
     pub error_events: u64,
@@ -46,10 +47,10 @@ pub fn print_text(runs: &[RunIndexEntry]) {
     }
 
     println!(
-        "{:<30} {:<18} {:>8} {:>12} {:>12} {:>8} {:>8}",
-        "Run ID", "Tokenizer", "Messages", "Tokens", "Wire bytes", "Calls", "Errors"
+        "{:<30} {:<18} {:>8} {:>12} {:>12} {:>12} {:>8} {:>8}",
+        "Run ID", "Tokenizer", "Messages", "Tokens", "Payload", "Wire", "Calls", "Errors"
     );
-    println!("{}", "-".repeat(106));
+    println!("{}", "-".repeat(119));
     for run in runs {
         let tokenizer = if run.token_count_estimated {
             format!("{}*", run.tokenizer)
@@ -57,12 +58,13 @@ pub fn print_text(runs: &[RunIndexEntry]) {
             run.tokenizer.clone()
         };
         println!(
-            "{:<30} {:<18} {:>8} {:>12} {:>12} {:>8} {:>8}",
+            "{:<30} {:<18} {:>8} {:>12} {:>12} {:>12} {:>8} {:>8}",
             run.run_id,
             tokenizer,
             run.messages,
             run.serialized_tokens,
-            run.wire_bytes,
+            optional_u64(run.payload_bytes),
+            optional_u64(run.wire_bytes),
             run.tool_calls,
             run.error_events
         );
@@ -83,7 +85,8 @@ fn aggregate_runs(events: &[MeasurementEvent]) -> Vec<RunIndexEntry> {
                 first_ts_unix_ns: event.ts_unix_ns,
                 last_ts_unix_ns: event.ts_unix_ns,
                 messages: 0,
-                wire_bytes: 0,
+                wire_bytes: Some(0),
+                payload_bytes: Some(0),
                 serialized_tokens: 0,
                 tool_calls: 0,
                 error_events: 0,
@@ -92,7 +95,8 @@ fn aggregate_runs(events: &[MeasurementEvent]) -> Vec<RunIndexEntry> {
         entry.first_ts_unix_ns = entry.first_ts_unix_ns.min(event.ts_unix_ns);
         entry.last_ts_unix_ns = entry.last_ts_unix_ns.max(event.ts_unix_ns);
         entry.messages += 1;
-        entry.wire_bytes += event.wire_bytes;
+        add_optional(&mut entry.wire_bytes, event.wire_bytes);
+        add_optional(&mut entry.payload_bytes, event.payload_bytes);
         entry.serialized_tokens += event.serialized_tokens;
         entry.tool_calls += event.tool_call_count;
         entry.error_events += u64::from(!event.ok);
@@ -108,6 +112,17 @@ fn aggregate_runs(events: &[MeasurementEvent]) -> Vec<RunIndexEntry> {
     result
 }
 
+fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
+    *total = match (*total, value) {
+        (Some(total), Some(value)) => Some(total.saturating_add(value)),
+        _ => None,
+    };
+}
+
+fn optional_u64(value: Option<u64>) -> String {
+    value.map(|v| v.to_string()).unwrap_or_else(|| "n/a".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,13 +130,13 @@ mod tests {
 
     fn event(run_id: &str, ts: u128, tokens: u64) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 3,
+            schema_version: 4,
             run_id: run_id.to_string(),
             ts_unix_ns: ts,
             transport: TransportKind::Stdio,
             direction: Direction::ClientToServer,
             kind: "request".to_string(),
-            wire_bytes: 10,
+            wire_bytes: Some(10),
             payload_bytes: Some(9),
             serialized_tokens: tokens,
             tokenizer: "o200k_base".to_string(),
@@ -151,6 +166,18 @@ mod tests {
         assert_eq!(runs[0].run_id, "new");
         assert_eq!(runs[1].run_id, "old");
         assert_eq!(runs[1].serialized_tokens, 8);
+        assert_eq!(runs[1].wire_bytes, Some(20));
+        assert_eq!(runs[1].payload_bytes, Some(18));
         assert_eq!(runs[1].messages, 2);
+    }
+
+    #[test]
+    fn unavailable_metric_stays_unavailable() {
+        let first = event("run", 1, 1);
+        let mut second = event("run", 2, 1);
+        second.wire_bytes = None;
+        let runs = aggregate_runs(&[first, second]);
+        assert_eq!(runs[0].wire_bytes, None);
+        assert_eq!(runs[0].payload_bytes, Some(18));
     }
 }
