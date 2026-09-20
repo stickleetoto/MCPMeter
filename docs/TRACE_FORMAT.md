@@ -2,15 +2,18 @@
 
 MCPMeter writes append-friendly JSON Lines (`.jsonl`) traces.
 
-The current event schema version is **1** and describes observed **stdio frames**. Streamable HTTP support is being designed separately so that HTTP application payload sizes are not mislabeled as stdio-style wire bytes.
+The current emitted event schema version is **2**. Schema v2 adds an explicit `transport` discriminator while preserving the existing stdio metric meanings. Schema v1 traces remain readable: when `transport` is absent, readers treat the event as `stdio`.
+
+Streamable HTTP payload metrics are still being designed separately so that HTTP application payload sizes are not mislabeled as stdio-style wire bytes.
 
 ## Event fields
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schema_version` | integer | Trace event schema version. Currently `1`. |
+| `schema_version` | integer | Trace event schema version. New events use `2`; v1 remains readable. |
 | `run_id` | string | Identifier shared by all events from one proxy process. |
 | `ts_unix_ns` | integer | Wall-clock observation timestamp in Unix nanoseconds. |
+| `transport` | string | `stdio` or `streamable_http`. Missing in v1 and defaults to `stdio` when read. |
 | `direction` | string | `client_to_server` or `server_to_client`. |
 | `kind` | string | Best-effort JSON-RPC classification such as `tools_call_request`, `tools_call_response`, `tools_list_request`, `tools_list_response`, `notification`, `batch`, or `malformed`. |
 | `wire_bytes` | integer | Exact bytes in the observed **stdio frame**, including its newline transport delimiter when present. This field's v1 meaning must not be reused for HTTP body bytes. |
@@ -61,6 +64,15 @@ MCPMeter intentionally keeps unlike quantities separate.
 - HTTP/TLS/network framing bytes
 
 Those quantities must not be inferred from `serialized_tokens` or `wire_bytes` without an independently defined adapter or observation layer.
+
+## Schema compatibility
+
+Schema v2 is additive for stdio traces:
+
+- writers emit `transport: "stdio"`;
+- v1 files without `transport` deserialize as stdio;
+- the meanings of `wire_bytes`, `serialized_tokens`, and `latencies_us` are unchanged for stdio;
+- HTTP-specific byte/timing fields will be added separately rather than overloading stdio fields.
 
 ## Streamable HTTP schema rule
 

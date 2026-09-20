@@ -200,7 +200,7 @@ fn percentile_ms(sorted_us: &[u64], percentile: f64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::MeasurementEvent;
+    use crate::event::{MeasurementEvent, TransportKind};
 
     fn event(
         direction: Direction,
@@ -211,9 +211,10 @@ mod tests {
         wire_bytes: u64,
     ) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 1,
+            schema_version: 2,
             run_id: "run".to_string(),
             ts_unix_ns: 1,
+            transport: TransportKind::Stdio,
             direction,
             kind: kind.to_string(),
             wire_bytes,

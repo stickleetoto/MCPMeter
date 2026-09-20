@@ -5,6 +5,8 @@ pub struct MeasurementEvent {
     pub schema_version: u32,
     pub run_id: String,
     pub ts_unix_ns: u128,
+    #[serde(default)]
+    pub transport: TransportKind,
     pub direction: Direction,
     pub kind: String,
     pub wire_bytes: u64,
@@ -38,4 +40,12 @@ pub struct MeasurementEvent {
 pub enum Direction {
     ClientToServer,
     ServerToClient,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportKind {
+    #[default]
+    Stdio,
+    StreamableHttp,
 }
