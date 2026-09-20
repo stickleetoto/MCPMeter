@@ -382,7 +382,10 @@ mod tests {
         assert_eq!(event.transport, TransportKind::StreamableHttp);
         assert_eq!(event.wire_bytes, None);
         assert_eq!(event.payload_bytes, Some(payload.len() as u64));
-        assert_eq!(event.serialized_tokens, tokenizer.count(std::str::from_utf8(payload).unwrap()) as u64);
+        assert_eq!(
+            event.serialized_tokens,
+            tokenizer.count(std::str::from_utf8(payload).unwrap()) as u64
+        );
     }
 
     #[test]
