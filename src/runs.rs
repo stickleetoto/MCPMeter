@@ -111,13 +111,14 @@ fn aggregate_runs(events: &[MeasurementEvent]) -> Vec<RunIndexEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::Direction;
+    use crate::event::{Direction, TransportKind};
 
     fn event(run_id: &str, ts: u128, tokens: u64) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 1,
+            schema_version: 2,
             run_id: run_id.to_string(),
             ts_unix_ns: ts,
+            transport: TransportKind::Stdio,
             direction: Direction::ClientToServer,
             kind: "request".to_string(),
             wire_bytes: 10,
