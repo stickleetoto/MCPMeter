@@ -57,14 +57,9 @@ pub fn run(config: HttpProxyConfig) -> Result<()> {
     );
 
     for request in server.incoming_requests() {
-        if let Err(error) = handle_request(
-            request,
-            &config,
-            &agent,
-            &run_id,
-            &mut pending,
-            &mut writer,
-        ) {
+        if let Err(error) =
+            handle_request(request, &config, &agent, &run_id, &mut pending, &mut writer)
+        {
             eprintln!("MCPMeter warning: HTTP request handling failed: {error:#}");
         }
     }
