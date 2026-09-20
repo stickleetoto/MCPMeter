@@ -2,6 +2,8 @@ mod compare;
 mod event;
 mod export;
 mod fixture;
+mod http_fixture;
+mod http_proxy;
 mod observer;
 mod proxy;
 mod report;
@@ -46,6 +48,29 @@ enum Commands {
         /// MCP server command and arguments. Prefer placing `--` before it.
         #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
+    },
+
+    /// Measure an MCP Streamable HTTP server through a reverse proxy.
+    HttpProxy {
+        /// Local listen address.
+        #[arg(long, default_value = "127.0.0.1:8787")]
+        listen: String,
+
+        /// Upstream MCP HTTP server base URL.
+        #[arg(long)]
+        upstream: String,
+
+        /// Append JSONL measurement events to this file.
+        #[arg(long, default_value = "mcpmeter.jsonl")]
+        trace: PathBuf,
+
+        /// Tokenizer profile: o200k-base, cl100k-base, or bytes4-estimate.
+        #[arg(long, default_value = "o200k-base")]
+        tokenizer: String,
+
+        /// Persist raw MCP HTTP bodies. Dangerous: payloads may contain secrets.
+        #[arg(long)]
+        capture_payloads: bool,
     },
 
     /// Summarize a JSONL trace. Defaults to the most recent run in the file.
@@ -142,6 +167,13 @@ enum Commands {
     /// Run the deterministic built-in MCP fixture server.
     #[command(hide = true)]
     Fixture,
+
+    /// Run the deterministic built-in HTTP MCP fixture server.
+    #[command(hide = true)]
+    HttpFixture {
+        #[arg(long)]
+        listen: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -164,6 +196,22 @@ fn main() -> Result<()> {
             if code != 0 {
                 std::process::exit(code);
             }
+        }
+        Commands::HttpProxy {
+            listen,
+            upstream,
+            trace,
+            tokenizer,
+            capture_payloads,
+        } => {
+            let tokenizer = TokenizerProfile::parse(&tokenizer)?;
+            http_proxy::run(http_proxy::HttpProxyConfig {
+                listen,
+                upstream,
+                trace_path: trace,
+                tokenizer,
+                capture_payloads,
+            })?;
         }
         Commands::Report {
             trace,
@@ -237,6 +285,7 @@ fn main() -> Result<()> {
             }
         }
         Commands::Fixture => fixture::run()?,
+        Commands::HttpFixture { listen } => http_fixture::run(&listen)?,
     }
 
     Ok(())
