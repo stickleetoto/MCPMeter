@@ -182,13 +182,13 @@ mod tests {
         schema_tokens: Option<u64>,
     ) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 3,
+            schema_version: 4,
             run_id: "run".to_string(),
             ts_unix_ns,
             transport: TransportKind::Stdio,
             direction,
             kind: "message".to_string(),
-            wire_bytes: 2,
+            wire_bytes: Some(2),
             payload_bytes: Some(1),
             serialized_tokens: tokens,
             tokenizer: "o200k_base".to_string(),
