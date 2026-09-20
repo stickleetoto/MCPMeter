@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
-use std::io::Read;
 use tiny_http::{Header, Response, Server, StatusCode};
 
 pub fn run(listen: &str) -> Result<()> {
@@ -168,7 +167,7 @@ fn header_value(request: &tiny_http::Request, name: &str) -> Option<String> {
     request
         .headers()
         .iter()
-        .find(|header| header.field.equiv(name))
+        .find(|header| header.field.to_string().eq_ignore_ascii_case(name))
         .map(|header| header.value.to_string())
 }
 
