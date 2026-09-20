@@ -7,6 +7,7 @@ mod proxy;
 mod report;
 mod runs;
 mod tokenizer;
+mod token_ledger;
 mod tool_cost;
 mod trace;
 
@@ -77,6 +78,20 @@ enum Commands {
         /// Export a specific run id instead of the most recent run.
         #[arg(long)]
         run_id: Option<String>,
+    },
+
+    /// Show event-by-event and cumulative serialized token usage.
+    Tokens {
+        /// JSONL trace produced by `mcp-meter proxy`.
+        trace: PathBuf,
+
+        /// Track a specific run id instead of the most recent run.
+        #[arg(long)]
+        run_id: Option<String>,
+
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show per-tool token, wire, error, and latency costs.
@@ -172,6 +187,18 @@ fn main() -> Result<()> {
             let format = export::ExportFormat::parse(&format)?;
             export::write_report(&report, format, &output)?;
             eprintln!("MCPMeter report -> {}", output.display());
+        }
+        Commands::Tokens {
+            trace,
+            run_id,
+            json,
+        } => {
+            let ledger = token_ledger::build_token_ledger(&trace, run_id.as_deref())?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&ledger)?);
+            } else {
+                token_ledger::print_text(&ledger);
+            }
         }
         Commands::Tools {
             trace,
