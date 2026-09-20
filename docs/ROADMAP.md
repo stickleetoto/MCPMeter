@@ -33,14 +33,33 @@ Goal: produce trustworthy measurements for a stdio MCP server with minimal behav
 
 ## v0.2 — Transport and Reporting
 
-- [ ] Streamable HTTP transport support
+### Reporting
+
 - [x] baseline vs candidate run comparison (landed early in v0.1)
 - [x] per-tool cost report (landed early in v0.1)
+- [x] HTML report
+- [x] CSV export
 - [ ] schema-cost comparison across MCP servers
-- [ ] HTML report
-- [ ] CSV export
 - [ ] configurable redaction rules
 - [ ] optional trace rotation / size limits
+
+### Streamable HTTP
+
+Target the current MCP `2026-07-28` stateless transport model first. Legacy 2025-era traffic may be relayed transparently where practical, but new measurement semantics must not depend on session state.
+
+- [x] define HTTP byte/timing measurement contract
+- [ ] define backward-compatible trace schema for transport-specific metrics
+- [ ] add HTTP reverse-proxy CLI/config
+- [ ] preserve method, path/query, status, MCP headers, auth headers, and content type while forwarding
+- [ ] observe direct JSON request/response payloads
+- [ ] forward and observe SSE incrementally without full-stream buffering
+- [ ] classify JSON-RPC messages carried in SSE `data:` events
+- [ ] record safe modern routing metadata such as `Mcp-Method` / `Mcp-Name`
+- [ ] deterministic local HTTP fixture
+- [ ] Linux and Windows HTTP regression coverage
+- [ ] document legacy 2025-era compatibility
+
+See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md).
 
 ## v0.3 — Agent Benchmarking
 
@@ -58,3 +77,4 @@ Goal: produce trustworthy measurements for a stdio MCP server with minimal behav
 - claiming exact model-visible token usage without provider evidence
 - cloud collection as a requirement
 - storing raw private workloads by default
+- TLS interception / MITM
