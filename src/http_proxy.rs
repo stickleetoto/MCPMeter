@@ -120,7 +120,7 @@ fn handle_request(
     for header in request.headers() {
         let name = header.field.to_string();
         if should_forward_request_header(&name) {
-            upstream_request = upstream_request.set(&name, &header.value.to_string());
+            upstream_request = upstream_request.set(&name, header.value.as_ref());
         }
     }
 
