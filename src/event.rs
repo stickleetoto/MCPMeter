@@ -9,7 +9,8 @@ pub struct MeasurementEvent {
     pub transport: TransportKind,
     pub direction: Direction,
     pub kind: String,
-    pub wire_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wire_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload_bytes: Option<u64>,
     pub serialized_tokens: u64,

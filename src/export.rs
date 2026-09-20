@@ -60,21 +60,28 @@ pub fn render_csv(report: &RunReport) -> String {
     csv_row(&mut out, "tools", &report.unique_tools.join(","));
     optional_u64_row(&mut out, "tools_exposed", report.tools_exposed);
     optional_u64_row(&mut out, "schema_tokens", report.schema_tokens);
-    csv_row(
+    optional_u64_row(
         &mut out,
         "wire_bytes_client_to_server",
-        &report.wire_bytes_client_to_server.to_string(),
+        report.wire_bytes_client_to_server,
     );
-    csv_row(
+    optional_u64_row(
         &mut out,
         "wire_bytes_server_to_client",
-        &report.wire_bytes_server_to_client.to_string(),
+        report.wire_bytes_server_to_client,
     );
-    csv_row(
+    optional_u64_row(&mut out, "wire_bytes_total", report.wire_bytes_total);
+    optional_u64_row(
         &mut out,
-        "wire_bytes_total",
-        &report.wire_bytes_total.to_string(),
+        "payload_bytes_client_to_server",
+        report.payload_bytes_client_to_server,
     );
+    optional_u64_row(
+        &mut out,
+        "payload_bytes_server_to_client",
+        report.payload_bytes_server_to_client,
+    );
+    optional_u64_row(&mut out, "payload_bytes_total", report.payload_bytes_total);
     csv_row(
         &mut out,
         "serialized_tokens_client_to_server",
@@ -149,13 +156,28 @@ pub fn render_html(report: &RunReport) -> String {
         "Wire bytes C→S / S→C",
         &format!(
             "{} / {}",
-            report.wire_bytes_client_to_server, report.wire_bytes_server_to_client
+            optional_u64_text(report.wire_bytes_client_to_server),
+            optional_u64_text(report.wire_bytes_server_to_client)
         ),
     );
     html_row(
         &mut rows,
         "Wire bytes total",
-        &report.wire_bytes_total.to_string(),
+        &optional_u64_text(report.wire_bytes_total),
+    );
+    html_row(
+        &mut rows,
+        "Payload bytes C→S / S→C",
+        &format!(
+            "{} / {}",
+            optional_u64_text(report.payload_bytes_client_to_server),
+            optional_u64_text(report.payload_bytes_server_to_client)
+        ),
+    );
+    html_row(
+        &mut rows,
+        "Payload bytes total",
+        &optional_u64_text(report.payload_bytes_total),
     );
     html_row(
         &mut rows,
@@ -272,9 +294,12 @@ mod tests {
             unique_tools: vec!["echo".to_string(), "quote,tool".to_string()],
             tools_exposed: Some(2),
             schema_tokens: Some(42),
-            wire_bytes_client_to_server: 100,
-            wire_bytes_server_to_client: 120,
-            wire_bytes_total: 220,
+            wire_bytes_client_to_server: Some(100),
+            wire_bytes_server_to_client: Some(120),
+            wire_bytes_total: Some(220),
+            payload_bytes_client_to_server: Some(99),
+            payload_bytes_server_to_client: Some(119),
+            payload_bytes_total: Some(218),
             serialized_tokens_client_to_server: 20,
             serialized_tokens_server_to_client: 30,
             serialized_tokens_total: 50,

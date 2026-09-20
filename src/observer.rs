@@ -106,13 +106,13 @@ pub fn observe_payload_at(
     let kind = classify_kind(root_is_batch, parse_error.is_some(), &facts);
 
     MeasurementEvent {
-        schema_version: 3,
+        schema_version: 4,
         run_id: run_id.to_string(),
         ts_unix_ns,
         transport: TransportKind::Stdio,
         direction,
         kind,
-        wire_bytes: payload.len() as u64,
+        wire_bytes: Some(payload.len() as u64),
         payload_bytes: Some(payload_bytes),
         serialized_tokens,
         tokenizer: tokenizer.name().to_string(),
@@ -314,7 +314,7 @@ mod tests {
         assert_eq!(req.tool_call_count, 1);
         assert_eq!(req.tools, vec!["add"]);
         assert_eq!(req.payload_bytes, Some((request.len() - 1) as u64));
-        assert_eq!(req.wire_bytes, request.len() as u64);
+        assert_eq!(req.wire_bytes, Some(request.len() as u64));
         assert_eq!(pending.len(), 1);
 
         let res = observe_payload_at(

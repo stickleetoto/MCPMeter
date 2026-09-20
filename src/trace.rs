@@ -53,13 +53,13 @@ mod tests {
 
     fn event(run_id: &str, ts: u128) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 3,
+            schema_version: 4,
             run_id: run_id.to_string(),
             ts_unix_ns: ts,
             transport: TransportKind::Stdio,
             direction: Direction::ClientToServer,
             kind: "request".to_string(),
-            wire_bytes: 2,
+            wire_bytes: Some(2),
             payload_bytes: Some(1),
             serialized_tokens: 1,
             tokenizer: "o200k_base".to_string(),
@@ -92,6 +92,7 @@ mod tests {
         let parsed: MeasurementEvent = serde_json::from_value(value).unwrap();
         assert_eq!(parsed.schema_version, 1);
         assert_eq!(parsed.transport, TransportKind::Stdio);
+        assert_eq!(parsed.wire_bytes, Some(2));
         assert_eq!(parsed.payload_bytes, None);
     }
 
@@ -110,9 +111,9 @@ mod tests {
     }
 
     #[test]
-    fn serialized_v3_event_names_transport_and_payload_bytes() {
+    fn serialized_v4_event_names_transport_and_payload_bytes() {
         let value = serde_json::to_value(event("current", 1)).unwrap();
-        assert_eq!(value["schema_version"], serde_json::json!(3));
+        assert_eq!(value["schema_version"], serde_json::json!(4));
         assert_eq!(value["transport"], serde_json::json!("stdio"));
         assert_eq!(value["payload_bytes"], serde_json::json!(1));
     }
