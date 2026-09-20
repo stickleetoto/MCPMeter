@@ -112,7 +112,10 @@ pub fn print_text(ledger: &TokenLedger) {
         ledger.serialized_tokens_total
     );
     if ledger.schema_tokens_observed > 0 {
-        println!("Schema:    {} observed tokens", ledger.schema_tokens_observed);
+        println!(
+            "Schema:    {} observed tokens",
+            ledger.schema_tokens_observed
+        );
     }
     println!();
     println!(
