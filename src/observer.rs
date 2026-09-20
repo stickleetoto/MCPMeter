@@ -137,6 +137,36 @@ pub fn observe_payload_at(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn observe_http_payload_at(
+    payload: &[u8],
+    direction: Direction,
+    run_id: &str,
+    tokenizer: &TokenizerProfile,
+    capture_payloads: bool,
+    pending: &mut PendingMap,
+    observed_at: Instant,
+    ts_unix_ns: u128,
+) -> MeasurementEvent {
+    let mut event = observe_payload_at(
+        payload,
+        direction,
+        run_id,
+        tokenizer,
+        capture_payloads,
+        pending,
+        observed_at,
+        ts_unix_ns,
+    );
+    event.transport = TransportKind::StreamableHttp;
+    event.wire_bytes = None;
+    event.payload_bytes = Some(payload.len() as u64);
+    if let Ok(text) = std::str::from_utf8(payload) {
+        event.serialized_tokens = tokenizer.count(text) as u64;
+    }
+    event
+}
+
 fn inspect_value(
     value: &Value,
     direction: Direction,
@@ -330,6 +360,29 @@ mod tests {
         assert_eq!(res.kind, "tools_call_response");
         assert_eq!(res.latencies_us, vec![2_000]);
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn http_observation_leaves_wire_bytes_unavailable() {
+        let tokenizer = TokenizerProfile::Bytes4Estimate;
+        let mut pending = PendingMap::new();
+        let payload = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}";
+
+        let event = observe_http_payload_at(
+            payload,
+            Direction::ClientToServer,
+            "http-test",
+            &tokenizer,
+            false,
+            &mut pending,
+            Instant::now(),
+            1,
+        );
+
+        assert_eq!(event.transport, TransportKind::StreamableHttp);
+        assert_eq!(event.wire_bytes, None);
+        assert_eq!(event.payload_bytes, Some(payload.len() as u64));
+        assert_eq!(event.serialized_tokens, tokenizer.count(std::str::from_utf8(payload).unwrap()) as u64);
     }
 
     #[test]
