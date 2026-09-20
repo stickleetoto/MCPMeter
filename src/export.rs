@@ -50,11 +50,7 @@ pub fn render_csv(report: &RunReport) -> String {
     csv_row(&mut out, "messages", &report.messages.to_string());
     csv_row(&mut out, "requests", &report.requests.to_string());
     csv_row(&mut out, "responses", &report.responses.to_string());
-    csv_row(
-        &mut out,
-        "notifications",
-        &report.notifications.to_string(),
-    );
+    csv_row(&mut out, "notifications", &report.notifications.to_string());
     csv_row(&mut out, "tool_calls", &report.tool_calls.to_string());
     csv_row(
         &mut out,
@@ -126,7 +122,11 @@ pub fn render_html(report: &RunReport) -> String {
         "Requests / responses",
         &format!("{} / {}", report.requests, report.responses),
     );
-    html_row(&mut rows, "Notifications", &report.notifications.to_string());
+    html_row(
+        &mut rows,
+        "Notifications",
+        &report.notifications.to_string(),
+    );
     html_row(&mut rows, "Tool calls", &report.tool_calls.to_string());
     html_row(
         &mut rows,
@@ -162,8 +162,7 @@ pub fn render_html(report: &RunReport) -> String {
         "Serialized tokens C→S / S→C",
         &format!(
             "{} / {}",
-            report.serialized_tokens_client_to_server,
-            report.serialized_tokens_server_to_client
+            report.serialized_tokens_client_to_server, report.serialized_tokens_server_to_client
         ),
     );
     html_row(
@@ -236,7 +235,9 @@ fn html_row(out: &mut String, key: &str, value: &str) {
 }
 
 fn optional_u64_text(value: Option<u64>) -> String {
-    value.map(|v| v.to_string()).unwrap_or_else(|| "—".to_string())
+    value
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "—".to_string())
 }
 
 fn optional_f64_text(value: Option<f64>) -> String {
