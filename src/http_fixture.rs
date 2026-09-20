@@ -3,8 +3,8 @@ use serde_json::{json, Value};
 use tiny_http::{Header, Response, Server, StatusCode};
 
 pub fn run(listen: &str) -> Result<()> {
-    let server = Server::http(listen)
-        .map_err(|error| anyhow!("failed to listen on {listen}: {error}"))?;
+    let server =
+        Server::http(listen).map_err(|error| anyhow!("failed to listen on {listen}: {error}"))?;
 
     for mut request in server.incoming_requests() {
         let target = request.url().to_string();
@@ -37,7 +37,11 @@ pub fn run(listen: &str) -> Result<()> {
         response.add_header(
             Header::from_bytes(
                 "X-Fixture-Mcp-Method",
-                if mcp_method.is_empty() { "missing" } else { &mcp_method },
+                if mcp_method.is_empty() {
+                    "missing"
+                } else {
+                    &mcp_method
+                },
             )
             .unwrap(),
         );
