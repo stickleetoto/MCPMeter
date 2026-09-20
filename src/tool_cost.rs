@@ -177,7 +177,11 @@ pub fn print_text(summary: &ToolCostSummary) {
     println!(
         "Tokenizer: {}{}",
         summary.tokenizer,
-        if summary.token_count_estimated { " (estimated)" } else { "" }
+        if summary.token_count_estimated {
+            " (estimated)"
+        } else {
+            ""
+        }
     );
     println!();
 
@@ -235,7 +239,9 @@ fn sum_optional_pair(left: Option<u64>, right: Option<u64>) -> Option<u64> {
 }
 
 fn optional_u64(value: Option<u64>) -> String {
-    value.map(|v| v.to_string()).unwrap_or_else(|| "n/a".to_string())
+    value
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "n/a".to_string())
 }
 
 fn optional_ms(value: Option<f64>) -> String {
