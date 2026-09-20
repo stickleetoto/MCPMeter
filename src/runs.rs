@@ -120,7 +120,9 @@ fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
 }
 
 fn optional_u64(value: Option<u64>) -> String {
-    value.map(|v| v.to_string()).unwrap_or_else(|| "n/a".to_string())
+    value
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "n/a".to_string())
 }
 
 #[cfg(test)]
