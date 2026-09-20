@@ -60,6 +60,10 @@ fn malformed_request_and_error_response_are_recorded() {
     assert_eq!(malformed["ok"], false);
     assert!(malformed["parse_error"].as_str().is_some());
     assert!(malformed["wire_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(
+        malformed["payload_bytes"].as_u64().unwrap() + 1,
+        malformed["wire_bytes"].as_u64().unwrap()
+    );
 
     let error_response = events
         .iter()

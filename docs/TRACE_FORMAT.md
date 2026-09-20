@@ -2,21 +2,22 @@
 
 MCPMeter writes append-friendly JSON Lines (`.jsonl`) traces.
 
-The current emitted event schema version is **2**. Schema v2 adds an explicit `transport` discriminator while preserving the existing stdio metric meanings. Schema v1 traces remain readable: when `transport` is absent, readers treat the event as `stdio`.
+The current emitted event schema version is **3**. Schema v2 added an explicit `transport` discriminator. Schema v3 adds explicitly scoped `payload_bytes` so application payload size is not conflated with transport framing.
 
-Streamable HTTP payload metrics are still being designed separately so that HTTP application payload sizes are not mislabeled as stdio-style wire bytes.
+Schema v1 and v2 traces remain readable. Missing `transport` defaults to `stdio`, and missing `payload_bytes` remains unknown rather than being guessed.
 
 ## Event fields
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schema_version` | integer | Trace event schema version. New events use `2`; v1 remains readable. |
+| `schema_version` | integer | Trace event schema version. New events use `3`; v1 and v2 remain readable. |
 | `run_id` | string | Identifier shared by all events from one proxy process. |
 | `ts_unix_ns` | integer | Wall-clock observation timestamp in Unix nanoseconds. |
 | `transport` | string | `stdio` or `streamable_http`. Missing in v1 and defaults to `stdio` when read. |
 | `direction` | string | `client_to_server` or `server_to_client`. |
 | `kind` | string | Best-effort JSON-RPC classification such as `tools_call_request`, `tools_call_response`, `tools_list_request`, `tools_list_response`, `notification`, `batch`, or `malformed`. |
-| `wire_bytes` | integer | Exact bytes in the observed **stdio frame**, including its newline transport delimiter when present. This field's v1 meaning must not be reused for HTTP body bytes. |
+| `wire_bytes` | integer | Exact bytes in the observed **stdio frame**, including its newline transport delimiter when present. This field's stdio meaning must not be reused for HTTP body bytes. |
+| `payload_bytes` | integer, optional | Exact bytes in the MCP application payload at the observed boundary. For new stdio events this excludes the newline delimiter. Missing in schema v1/v2 and therefore unknown for old traces. |
 | `serialized_tokens` | integer | Token count for the observed UTF-8 payload after removing the stdio transport newline, using the selected tokenizer profile. |
 | `tokenizer` | string | Tokenizer profile used for `serialized_tokens`. |
 | `token_count_estimated` | boolean | `true` when the tokenizer profile itself is heuristic. |
@@ -41,6 +42,7 @@ MCPMeter intentionally keeps unlike quantities separate.
 ### Exact at the MCP stdio boundary
 
 - frame bytes
+- MCP application payload bytes, separately from the stdio delimiter
 - message direction
 - observed JSON text
 - selected-tokenizer token count of that exact JSON text
@@ -67,12 +69,14 @@ Those quantities must not be inferred from `serialized_tokens` or `wire_bytes` w
 
 ## Schema compatibility
 
-Schema v2 is additive for stdio traces:
+Schema v3 is additive for stdio traces:
 
 - writers emit `transport: "stdio"`;
 - v1 files without `transport` deserialize as stdio;
+- v1/v2 files without `payload_bytes` deserialize with that metric unavailable;
+- new stdio events set `payload_bytes` to the frame size excluding the newline delimiter;
 - the meanings of `wire_bytes`, `serialized_tokens`, and `latencies_us` are unchanged for stdio;
-- HTTP-specific byte/timing fields will be added separately rather than overloading stdio fields.
+- future HTTP body/SSE accounting uses `payload_bytes` or more-specific HTTP fields rather than pretending application bytes are network wire bytes.
 
 ## Streamable HTTP schema rule
 

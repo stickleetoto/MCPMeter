@@ -211,13 +211,14 @@ mod tests {
         wire_bytes: u64,
     ) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 2,
+            schema_version: 3,
             run_id: "run".to_string(),
             ts_unix_ns: 1,
             transport: TransportKind::Stdio,
             direction,
             kind: kind.to_string(),
             wire_bytes,
+            payload_bytes: Some(wire_bytes.saturating_sub(1)),
             serialized_tokens: tokens,
             tokenizer: "o200k_base".to_string(),
             token_count_estimated: false,

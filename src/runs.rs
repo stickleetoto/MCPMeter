@@ -115,13 +115,14 @@ mod tests {
 
     fn event(run_id: &str, ts: u128, tokens: u64) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 2,
+            schema_version: 3,
             run_id: run_id.to_string(),
             ts_unix_ns: ts,
             transport: TransportKind::Stdio,
             direction: Direction::ClientToServer,
             kind: "request".to_string(),
             wire_bytes: 10,
+            payload_bytes: Some(9),
             serialized_tokens: tokens,
             tokenizer: "o200k_base".to_string(),
             token_count_estimated: false,
