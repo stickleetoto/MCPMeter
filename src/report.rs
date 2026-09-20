@@ -18,9 +18,12 @@ pub struct RunReport {
     pub unique_tools: Vec<String>,
     pub tools_exposed: Option<u64>,
     pub schema_tokens: Option<u64>,
-    pub wire_bytes_client_to_server: u64,
-    pub wire_bytes_server_to_client: u64,
-    pub wire_bytes_total: u64,
+    pub wire_bytes_client_to_server: Option<u64>,
+    pub wire_bytes_server_to_client: Option<u64>,
+    pub wire_bytes_total: Option<u64>,
+    pub payload_bytes_client_to_server: Option<u64>,
+    pub payload_bytes_server_to_client: Option<u64>,
+    pub payload_bytes_total: Option<u64>,
     pub serialized_tokens_client_to_server: u64,
     pub serialized_tokens_server_to_client: u64,
     pub serialized_tokens_total: u64,
@@ -40,6 +43,10 @@ pub fn build_report(path: &Path, requested_run: Option<&str>) -> Result<RunRepor
     let token_count_estimated = selected.iter().any(|event| event.token_count_estimated);
     let mut unique_tools = BTreeSet::new();
     let mut latencies_us = Vec::new();
+    let mut wire_c2s = Some(0_u64);
+    let mut wire_s2c = Some(0_u64);
+    let mut payload_c2s = Some(0_u64);
+    let mut payload_s2c = Some(0_u64);
     let mut report = RunReport {
         run_id,
         tokenizer,
@@ -52,9 +59,12 @@ pub fn build_report(path: &Path, requested_run: Option<&str>) -> Result<RunRepor
         unique_tools: Vec::new(),
         tools_exposed: None,
         schema_tokens: None,
-        wire_bytes_client_to_server: 0,
-        wire_bytes_server_to_client: 0,
-        wire_bytes_total: 0,
+        wire_bytes_client_to_server: None,
+        wire_bytes_server_to_client: None,
+        wire_bytes_total: None,
+        payload_bytes_client_to_server: None,
+        payload_bytes_server_to_client: None,
+        payload_bytes_total: None,
         serialized_tokens_client_to_server: 0,
         serialized_tokens_server_to_client: 0,
         serialized_tokens_total: 0,
@@ -72,7 +82,6 @@ pub fn build_report(path: &Path, requested_run: Option<&str>) -> Result<RunRepor
         report.responses += event.response_count;
         report.notifications += event.notification_count;
         report.tool_calls += event.tool_call_count;
-        report.wire_bytes_total += event.wire_bytes;
         report.serialized_tokens_total += event.serialized_tokens;
         if !event.ok {
             report.error_events += 1;
@@ -80,11 +89,13 @@ pub fn build_report(path: &Path, requested_run: Option<&str>) -> Result<RunRepor
 
         match event.direction {
             Direction::ClientToServer => {
-                report.wire_bytes_client_to_server += event.wire_bytes;
+                add_optional(&mut wire_c2s, event.wire_bytes);
+                add_optional(&mut payload_c2s, event.payload_bytes);
                 report.serialized_tokens_client_to_server += event.serialized_tokens;
             }
             Direction::ServerToClient => {
-                report.wire_bytes_server_to_client += event.wire_bytes;
+                add_optional(&mut wire_s2c, event.wire_bytes);
+                add_optional(&mut payload_s2c, event.payload_bytes);
                 report.serialized_tokens_server_to_client += event.serialized_tokens;
             }
         }
@@ -100,6 +111,13 @@ pub fn build_report(path: &Path, requested_run: Option<&str>) -> Result<RunRepor
         }
         latencies_us.extend(event.latencies_us.iter().copied());
     }
+
+    report.wire_bytes_client_to_server = wire_c2s;
+    report.wire_bytes_server_to_client = wire_s2c;
+    report.wire_bytes_total = sum_optional_pair(wire_c2s, wire_s2c);
+    report.payload_bytes_client_to_server = payload_c2s;
+    report.payload_bytes_server_to_client = payload_s2c;
+    report.payload_bytes_total = sum_optional_pair(payload_c2s, payload_s2c);
 
     latencies_us.sort_unstable();
     report.latency_samples = latencies_us.len() as u64;
@@ -117,11 +135,7 @@ pub fn print_text(report: &RunReport) {
     println!(
         "Tokenizer:           {}{}",
         report.tokenizer,
-        if report.token_count_estimated {
-            " (estimated)"
-        } else {
-            ""
-        }
+        if report.token_count_estimated { " (estimated)" } else { "" }
     );
     println!("Messages:            {}", report.messages);
     println!(
@@ -142,9 +156,16 @@ pub fn print_text(report: &RunReport) {
     }
     println!(
         "Wire bytes C→S/S→C:  {} / {}",
-        report.wire_bytes_client_to_server, report.wire_bytes_server_to_client
+        optional_u64(report.wire_bytes_client_to_server),
+        optional_u64(report.wire_bytes_server_to_client)
     );
-    println!("Wire bytes total:    {}", report.wire_bytes_total);
+    println!("Wire bytes total:    {}", optional_u64(report.wire_bytes_total));
+    println!(
+        "Payload bytes C→S/S→C: {} / {}",
+        optional_u64(report.payload_bytes_client_to_server),
+        optional_u64(report.payload_bytes_server_to_client)
+    );
+    println!("Payload bytes total: {}", optional_u64(report.payload_bytes_total));
     println!(
         "Tokens C→S/S→C:      {} / {}",
         report.serialized_tokens_client_to_server, report.serialized_tokens_server_to_client
@@ -170,6 +191,21 @@ pub fn print_text(report: &RunReport) {
     }
 }
 
+fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
+    *total = match (*total, value) {
+        (Some(total), Some(value)) => Some(total.saturating_add(value)),
+        _ => None,
+    };
+}
+
+fn sum_optional_pair(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    Some(left?.saturating_add(right?))
+}
+
+fn optional_u64(value: Option<u64>) -> String {
+    value.map(|v| v.to_string()).unwrap_or_else(|| "n/a".to_string())
+}
+
 fn percentile_ms(sorted_us: &[u64], percentile: f64) -> Option<f64> {
     if sorted_us.is_empty() {
         return None;
@@ -188,5 +224,16 @@ mod tests {
         let values = vec![1_000, 2_000, 3_000, 4_000, 5_000];
         assert_eq!(percentile_ms(&values, 0.50), Some(3.0));
         assert_eq!(percentile_ms(&values, 0.95), Some(5.0));
+    }
+
+    #[test]
+    fn optional_sum_becomes_unavailable_when_any_sample_is_unavailable() {
+        let mut total = Some(10);
+        add_optional(&mut total, Some(5));
+        assert_eq!(total, Some(15));
+        add_optional(&mut total, None);
+        assert_eq!(total, None);
+        add_optional(&mut total, Some(7));
+        assert_eq!(total, None);
     }
 }
