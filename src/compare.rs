@@ -9,7 +9,8 @@ pub struct ComparisonReport {
     pub tokenizer: String,
     pub token_count_estimated: bool,
     pub serialized_tokens: U64Delta,
-    pub wire_bytes: U64Delta,
+    pub wire_bytes: Option<U64Delta>,
+    pub payload_bytes: Option<U64Delta>,
     pub tool_calls: U64Delta,
     pub error_events: U64Delta,
     pub schema_tokens: Option<U64Delta>,
@@ -53,7 +54,8 @@ pub fn compare_reports(baseline: &RunReport, candidate: &RunReport) -> Result<Co
             baseline.serialized_tokens_total,
             candidate.serialized_tokens_total,
         ),
-        wire_bytes: delta_u64(baseline.wire_bytes_total, candidate.wire_bytes_total),
+        wire_bytes: zip_u64(baseline.wire_bytes_total, candidate.wire_bytes_total),
+        payload_bytes: zip_u64(baseline.payload_bytes_total, candidate.payload_bytes_total),
         tool_calls: delta_u64(baseline.tool_calls, candidate.tool_calls),
         error_events: delta_u64(baseline.error_events, candidate.error_events),
         schema_tokens: zip_u64(baseline.schema_tokens, candidate.schema_tokens),
@@ -83,7 +85,12 @@ pub fn print_text(report: &ComparisonReport) {
     );
     println!("{}", "-".repeat(72));
     print_u64_row("Serialized tokens", &report.serialized_tokens);
-    print_u64_row("Wire bytes", &report.wire_bytes);
+    if let Some(delta) = &report.wire_bytes {
+        print_u64_row("Wire bytes", delta);
+    }
+    if let Some(delta) = &report.payload_bytes {
+        print_u64_row("Payload bytes", delta);
+    }
     print_u64_row("Tool calls", &report.tool_calls);
     print_u64_row("Error events", &report.error_events);
     if let Some(delta) = &report.schema_tokens {
@@ -180,9 +187,12 @@ mod tests {
             unique_tools: Vec::new(),
             tools_exposed: Some(3),
             schema_tokens: Some(100),
-            wire_bytes_client_to_server: 0,
-            wire_bytes_server_to_client: 0,
-            wire_bytes_total: 1_000,
+            wire_bytes_client_to_server: Some(0),
+            wire_bytes_server_to_client: Some(0),
+            wire_bytes_total: Some(1_000),
+            payload_bytes_client_to_server: Some(0),
+            payload_bytes_server_to_client: Some(0),
+            payload_bytes_total: Some(900),
             serialized_tokens_client_to_server: 0,
             serialized_tokens_server_to_client: 0,
             serialized_tokens_total: tokens,
