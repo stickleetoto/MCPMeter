@@ -135,7 +135,11 @@ pub fn print_text(report: &RunReport) {
     println!(
         "Tokenizer:           {}{}",
         report.tokenizer,
-        if report.token_count_estimated { " (estimated)" } else { "" }
+        if report.token_count_estimated {
+            " (estimated)"
+        } else {
+            ""
+        }
     );
     println!("Messages:            {}", report.messages);
     println!(
@@ -159,13 +163,19 @@ pub fn print_text(report: &RunReport) {
         optional_u64(report.wire_bytes_client_to_server),
         optional_u64(report.wire_bytes_server_to_client)
     );
-    println!("Wire bytes total:    {}", optional_u64(report.wire_bytes_total));
+    println!(
+        "Wire bytes total:    {}",
+        optional_u64(report.wire_bytes_total)
+    );
     println!(
         "Payload bytes C→S/S→C: {} / {}",
         optional_u64(report.payload_bytes_client_to_server),
         optional_u64(report.payload_bytes_server_to_client)
     );
-    println!("Payload bytes total: {}", optional_u64(report.payload_bytes_total));
+    println!(
+        "Payload bytes total: {}",
+        optional_u64(report.payload_bytes_total)
+    );
     println!(
         "Tokens C→S/S→C:      {} / {}",
         report.serialized_tokens_client_to_server, report.serialized_tokens_server_to_client
@@ -203,7 +213,9 @@ fn sum_optional_pair(left: Option<u64>, right: Option<u64>) -> Option<u64> {
 }
 
 fn optional_u64(value: Option<u64>) -> String {
-    value.map(|v| v.to_string()).unwrap_or_else(|| "n/a".to_string())
+    value
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "n/a".to_string())
 }
 
 fn percentile_ms(sorted_us: &[u64], percentile: f64) -> Option<f64> {
