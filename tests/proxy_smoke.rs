@@ -74,6 +74,11 @@ fn proxy_records_tools_list_and_call() {
         .any(|event| event["kind"] == "tools_call_response"));
     assert!(events.iter().any(|event| event["tools_exposed"] == 3));
     assert!(events.iter().any(|event| event["tool_call_count"] == 1));
+    assert!(events.iter().all(|event| event["schema_version"] == 3));
+    assert!(events.iter().all(|event| event["transport"] == "stdio"));
+    assert!(events.iter().all(|event| {
+        event["payload_bytes"].as_u64().unwrap() + 1 == event["wire_bytes"].as_u64().unwrap()
+    }));
     assert!(events
         .iter()
         .all(|event| event.get("raw_payload").is_none()));

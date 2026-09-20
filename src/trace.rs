@@ -53,13 +53,14 @@ mod tests {
 
     fn event(run_id: &str, ts: u128) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 2,
+            schema_version: 3,
             run_id: run_id.to_string(),
             ts_unix_ns: ts,
             transport: TransportKind::Stdio,
             direction: Direction::ClientToServer,
             kind: "request".to_string(),
-            wire_bytes: 1,
+            wire_bytes: 2,
+            payload_bytes: Some(1),
             serialized_tokens: 1,
             tokenizer: "o200k_base".to_string(),
             token_count_estimated: false,
@@ -85,18 +86,35 @@ mod tests {
         let mut value = serde_json::to_value(current).unwrap();
         let object = value.as_object_mut().unwrap();
         object.remove("transport");
+        object.remove("payload_bytes");
         object.insert("schema_version".to_string(), serde_json::json!(1));
 
         let parsed: MeasurementEvent = serde_json::from_value(value).unwrap();
         assert_eq!(parsed.schema_version, 1);
         assert_eq!(parsed.transport, TransportKind::Stdio);
+        assert_eq!(parsed.payload_bytes, None);
     }
 
     #[test]
-    fn serialized_v2_event_names_stdio_transport() {
+    fn v2_event_without_payload_bytes_remains_readable() {
+        let current = event("v2", 1);
+        let mut value = serde_json::to_value(current).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("payload_bytes");
+        object.insert("schema_version".to_string(), serde_json::json!(2));
+
+        let parsed: MeasurementEvent = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.schema_version, 2);
+        assert_eq!(parsed.transport, TransportKind::Stdio);
+        assert_eq!(parsed.payload_bytes, None);
+    }
+
+    #[test]
+    fn serialized_v3_event_names_transport_and_payload_bytes() {
         let value = serde_json::to_value(event("current", 1)).unwrap();
-        assert_eq!(value["schema_version"], serde_json::json!(2));
+        assert_eq!(value["schema_version"], serde_json::json!(3));
         assert_eq!(value["transport"], serde_json::json!("stdio"));
+        assert_eq!(value["payload_bytes"], serde_json::json!(1));
     }
 
     #[test]

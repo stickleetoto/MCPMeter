@@ -63,6 +63,7 @@ pub fn observe_payload_at(
     hasher.update(payload);
     let payload_sha256 = format!("{:x}", hasher.finalize());
 
+    let payload_bytes = strip_transport_newline_bytes(payload).len() as u64;
     let text_result = std::str::from_utf8(payload);
     let token_text = text_result
         .ok()
@@ -105,13 +106,14 @@ pub fn observe_payload_at(
     let kind = classify_kind(root_is_batch, parse_error.is_some(), &facts);
 
     MeasurementEvent {
-        schema_version: 2,
+        schema_version: 3,
         run_id: run_id.to_string(),
         ts_unix_ns,
         transport: TransportKind::Stdio,
         direction,
         kind,
         wire_bytes: payload.len() as u64,
+        payload_bytes: Some(payload_bytes),
         serialized_tokens,
         tokenizer: tokenizer.name().to_string(),
         token_count_estimated: tokenizer.is_estimate(),
@@ -264,6 +266,16 @@ fn id_key(id: &Value) -> String {
     serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
 }
 
+fn strip_transport_newline_bytes(payload: &[u8]) -> &[u8] {
+    if payload.ends_with(b"\r\n") {
+        &payload[..payload.len() - 2]
+    } else if payload.ends_with(b"\n") {
+        &payload[..payload.len() - 1]
+    } else {
+        payload
+    }
+}
+
 fn strip_transport_newline(text: &str) -> &str {
     text.strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'))
@@ -301,6 +313,8 @@ mod tests {
         );
         assert_eq!(req.tool_call_count, 1);
         assert_eq!(req.tools, vec!["add"]);
+        assert_eq!(req.payload_bytes, Some((request.len() - 1) as u64));
+        assert_eq!(req.wire_bytes, request.len() as u64);
         assert_eq!(pending.len(), 1);
 
         let res = observe_payload_at(
