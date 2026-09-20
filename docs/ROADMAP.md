@@ -48,7 +48,7 @@ Goal: produce trustworthy measurements for a stdio MCP server with minimal behav
 Target the current MCP `2026-07-28` stateless transport model first. Legacy 2025-era traffic may be relayed transparently where practical, but new measurement semantics must not depend on session state.
 
 - [x] define HTTP byte/timing measurement contract
-- [ ] define backward-compatible trace schema for transport-specific metrics
+- [x] define backward-compatible trace schema for transport-specific metrics
 - [ ] add HTTP reverse-proxy CLI/config
 - [ ] preserve method, path/query, status, MCP headers, auth headers, and content type while forwarding
 - [ ] observe direct JSON request/response payloads
