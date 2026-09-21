@@ -70,13 +70,10 @@ Landed:
 - [x] keep HTTP raw-payload capture explicit opt-in only
 - [x] deterministic local HTTP fixture coverage
 - [x] Linux and Windows HTTP regression coverage
-
-Remaining:
-
-- [ ] record safe modern routing metadata such as `Mcp-Method` / `Mcp-Name` without persisting secrets
-- [ ] forward and observe SSE incrementally without buffering the full response
-- [ ] classify JSON-RPC messages carried in SSE `data:` events when possible
-- [ ] document legacy 2025-era Streamable HTTP behavior and limitations
+- [x] record safe modern routing metadata such as `Mcp-Method` / `Mcp-Name` without persisting secrets
+- [x] forward and observe SSE incrementally without buffering the full response
+- [x] classify JSON-RPC messages carried in SSE `data:` events when possible
+- [x] document legacy 2025-era Streamable HTTP behavior and limitations
 
 See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md) and parent tracking issue #4.
 
@@ -84,13 +81,18 @@ See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md) and parent tracking issue #4.
 
 Keep each change bounded and independently reviewable:
 
+Completed transport sequence:
+
 1. safe `Mcp-Method` / `Mcp-Name` routing metadata
 2. incremental SSE forwarding/observation
 3. SSE `data:` JSON-RPC classification
 4. legacy 2025-era compatibility documentation
-5. schema-cost comparison across MCP servers
-6. configurable redaction rules
-7. optional trace rotation / size limits
+
+Next reporting work:
+
+1. schema-cost comparison across MCP servers
+2. configurable redaction rules
+3. optional trace rotation / size limits
 
 Do not weaken these invariants while completing v0.2:
 
