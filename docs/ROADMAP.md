@@ -1,26 +1,28 @@
 # MCPMeter Roadmap
 
-## v0.1 — Measurement Core
+MCPMeter measures the real cost and behavior of MCP transports without pretending that observed transport payloads are identical to model-visible or billable tokens.
+
+## v0.1 — Measurement Core ✅
 
 Goal: produce trustworthy measurements for a stdio MCP server with minimal behavioral interference.
 
-### P0
+### Core proxy and observation
 
-- [x] Transparent stdio proxy
+- [x] transparent stdio proxy
 - [x] JSON-RPC newline framing / byte-preserving forwarding
 - [x] `tools/list` observation
 - [x] `tools/call` observation
-- [x] exact byte accounting
+- [x] exact stdio byte accounting
 - [x] request/response boundary latency measurement
 - [x] tokenizer abstraction
 - [x] schema-token and serialized request/response payload token metrics
 - [x] append-friendly JSONL run trace
-- [x] CLI summary report
 - [x] safe-by-default traces with raw payload persistence disabled by default
-- [x] deterministic fixture MCP server for tests
+- [x] deterministic fixture MCP server
 
-### P1
+### Reporting and regression baseline
 
+- [x] CLI summary report
 - [x] p50 / p95 / p99 / max latency report
 - [x] per-tool cost breakdown with explicit batch-attribution semantics
 - [x] run metadata and stable run selection
@@ -33,12 +35,20 @@ Goal: produce trustworthy measurements for a stdio MCP server with minimal behav
 
 ## v0.2 — Transport and Reporting
 
+Goal: extend the trustworthy measurement contract beyond stdio while improving comparison and export workflows.
+
 ### Reporting
 
-- [x] baseline vs candidate run comparison (landed early in v0.1)
-- [x] per-tool cost report (landed early in v0.1)
+Already landed:
+
+- [x] baseline vs candidate run comparison
+- [x] per-tool cost report
 - [x] HTML report
 - [x] CSV export
+- [x] cumulative serialized-token ledger
+
+Remaining:
+
 - [ ] schema-cost comparison across MCP servers
 - [ ] configurable redaction rules
 - [ ] optional trace rotation / size limits
@@ -47,21 +57,52 @@ Goal: produce trustworthy measurements for a stdio MCP server with minimal behav
 
 Target the current MCP `2026-07-28` stateless transport model first. Legacy 2025-era traffic may be relayed transparently where practical, but new measurement semantics must not depend on session state.
 
-- [x] define HTTP byte/timing measurement contract
-- [x] define backward-compatible trace schema for transport-specific metrics
-- [ ] add HTTP reverse-proxy CLI/config
-- [ ] preserve method, path/query, status, MCP headers, auth headers, and content type while forwarding
-- [ ] observe direct JSON request/response payloads
-- [ ] forward and observe SSE incrementally without full-stream buffering
-- [ ] classify JSON-RPC messages carried in SSE `data:` events
-- [ ] record safe modern routing metadata such as `Mcp-Method` / `Mcp-Name`
-- [ ] deterministic local HTTP fixture
-- [ ] Linux and Windows HTTP regression coverage
-- [ ] document legacy 2025-era compatibility
+Landed:
 
-See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md).
+- [x] define HTTP byte/timing measurement contract
+- [x] add backward-compatible transport discrimination to the trace schema
+- [x] separate HTTP application payload bytes from exact stdio wire bytes
+- [x] make wire-byte fields transport-aware / optional where exact wire measurement is unavailable
+- [x] add dedicated Streamable HTTP reverse-proxy CLI/config
+- [x] preserve request method, path/query, relevant MCP/auth headers, response status/headers, and content type while forwarding
+- [x] observe direct JSON request/response payloads without mutating them
+- [x] define latency semantics for direct JSON responses and long-lived streams
+- [x] keep HTTP raw-payload capture explicit opt-in only
+- [x] deterministic local HTTP fixture coverage
+- [x] Linux and Windows HTTP regression coverage
+
+Remaining:
+
+- [ ] record safe modern routing metadata such as `Mcp-Method` / `Mcp-Name` without persisting secrets
+- [ ] forward and observe SSE incrementally without buffering the full response
+- [ ] classify JSON-RPC messages carried in SSE `data:` events when possible
+- [ ] document legacy 2025-era Streamable HTTP behavior and limitations
+
+See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md) and parent tracking issue #4.
+
+### Recommended v0.2 implementation order
+
+Keep each change bounded and independently reviewable:
+
+1. safe `Mcp-Method` / `Mcp-Name` routing metadata
+2. incremental SSE forwarding/observation
+3. SSE `data:` JSON-RPC classification
+4. legacy 2025-era compatibility documentation
+5. schema-cost comparison across MCP servers
+6. configurable redaction rules
+7. optional trace rotation / size limits
+
+Do not weaken these invariants while completing v0.2:
+
+- exact stdio wire bytes remain distinct from HTTP application payload bytes
+- observed serialized-token counts are not labeled provider/model-context usage
+- auth credentials and other secrets are not persisted as routing metadata
+- long-lived SSE responses are never buffered to completion before forwarding
+- raw payload persistence remains opt-in
 
 ## v0.3 — Agent Benchmarking
+
+Goal: connect transport measurements to controlled agent-level experiments without turning MCPMeter into an orchestration framework.
 
 - [ ] provider-reported usage adapters where available
 - [ ] model-context estimate adapters
@@ -69,6 +110,15 @@ See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md).
 - [ ] task success/test-result hooks
 - [ ] MCP efficiency metrics
 - [ ] batch/tool-selection analysis
+
+## Later candidates
+
+Only after the v0.2 transport contract is stable:
+
+- richer cross-run trend/history views
+- host-aware context-cost adapters
+- export formats required by real benchmarking workflows
+- additional MCP transports when their measurement semantics can remain explicit
 
 ## Non-goals for early versions
 
