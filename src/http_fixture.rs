@@ -130,10 +130,7 @@ pub fn run(listen: &str) -> Result<()> {
 
 fn sse_response_for(value: &Value) -> Result<Vec<u8>> {
     let id = value.get("id").cloned().unwrap_or(Value::Null);
-    let result_text = match value
-        .pointer("/params/name")
-        .and_then(Value::as_str)
-    {
+    let result_text = match value.pointer("/params/name").and_then(Value::as_str) {
         Some("add") => {
             let a = value
                 .pointer("/params/arguments/a")
