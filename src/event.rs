@@ -7,6 +7,12 @@ pub struct MeasurementEvent {
     pub ts_unix_ns: u128,
     #[serde(default)]
     pub transport: TransportKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_mcp_protocol_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_mcp_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_mcp_name: Option<String>,
     pub direction: Direction,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

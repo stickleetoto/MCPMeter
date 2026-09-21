@@ -57,7 +57,7 @@ fn direct_json_http_proxy_forwards_and_measures_tool_call() {
     let response = send_http(
         &proxy_addr,
         &format!(
-            "POST /mcp?case=smoke HTTP/1.1\r\nHost: {proxy_addr}\r\nContent-Type: application/json\r\nMCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/call\r\nAuthorization: Bearer test-secret\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            "POST /mcp?case=smoke HTTP/1.1\r\nHost: {proxy_addr}\r\nContent-Type: application/json\r\nMCP-Protocol-Version: 2026-07-28\r\nMcp-Method: tools/call\r\nMcp-Name: add\r\nMcp-Param-query: fixture-param-marker\r\nAuthorization: fixture-auth-marker\r\nCookie: sid=fixture-cookie-marker\r\nProxy-Authorization: fixture-proxy-marker\r\nX-App-Secret: fixture-app-marker\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
             body
         ),
@@ -108,9 +108,43 @@ fn direct_json_http_proxy_forwards_and_measures_tool_call() {
         .iter()
         .find(|event| event["direction"] == "client_to_server")
         .expect("request trace event");
+    assert_eq!(request_event["schema_version"], 5);
     assert_eq!(request_event["kind"], "tools_call_request");
     assert_eq!(request_event["tools"][0], "add");
     assert_eq!(request_event["payload_bytes"], body.len() as u64);
+    assert_eq!(
+        request_event["http_mcp_protocol_version"],
+        "2026-07-28"
+    );
+    assert_eq!(request_event["http_mcp_method"], "tools/call");
+    assert_eq!(request_event["http_mcp_name"], "add");
+
+    let trace_lower = trace_text.to_ascii_lowercase();
+    for forbidden_header in [
+        "authorization",
+        "cookie",
+        "set-cookie",
+        "proxy-authorization",
+        "mcp-param-",
+        "x-app-secret",
+    ] {
+        assert!(
+            !trace_lower.contains(forbidden_header),
+            "trace unexpectedly serialized header {forbidden_header}: {trace_text}"
+        );
+    }
+    for forbidden_value in [
+        "fixture-param-marker",
+        "fixture-auth-marker",
+        "sid=fixture-cookie-marker",
+        "fixture-proxy-marker",
+        "fixture-app-marker",
+    ] {
+        assert!(
+            !trace_text.contains(forbidden_value),
+            "trace unexpectedly serialized sensitive marker: {trace_text}"
+        );
+    }
 
     let response_event = events
         .iter()
@@ -119,6 +153,9 @@ fn direct_json_http_proxy_forwards_and_measures_tool_call() {
     assert_eq!(response_event["kind"], "tools_call_response");
     assert_eq!(response_event["tools"][0], "add");
     assert_eq!(response_event["latencies_us"].as_array().unwrap().len(), 1);
+    assert!(response_event.get("http_mcp_protocol_version").is_none());
+    assert!(response_event.get("http_mcp_method").is_none());
+    assert!(response_event.get("http_mcp_name").is_none());
 
     cleanup(&mut proxy);
     cleanup(&mut fixture);
