@@ -18,6 +18,51 @@ pub struct HttpProxyConfig {
     pub capture_payloads: bool,
 }
 
+#[derive(Debug, Default)]
+struct HttpRequestRoutingMetadata {
+    protocol_version: Option<String>,
+    mcp_method: Option<String>,
+    mcp_name: Option<String>,
+}
+
+fn collect_request_routing_metadata(headers: &[Header]) -> HttpRequestRoutingMetadata {
+    HttpRequestRoutingMetadata {
+        protocol_version: allowlisted_header_value(headers, "MCP-Protocol-Version"),
+        mcp_method: allowlisted_header_value(headers, "Mcp-Method"),
+        mcp_name: allowlisted_header_value(headers, "Mcp-Name"),
+    }
+}
+
+fn allowlisted_header_value(headers: &[Header], name: &str) -> Option<String> {
+    let mut selected = None;
+
+    for header in headers {
+        if !header.field.to_string().eq_ignore_ascii_case(name) {
+            continue;
+        }
+        if selected.is_some() {
+            return None;
+        }
+
+        let value: &str = header.value.as_ref();
+        if value.trim().is_empty() || value.chars().any(char::is_control) {
+            return None;
+        }
+        selected = Some(value.to_string());
+    }
+
+    selected
+}
+
+fn apply_request_routing_metadata(
+    event: &mut MeasurementEvent,
+    metadata: HttpRequestRoutingMetadata,
+) {
+    event.http_mcp_protocol_version = metadata.protocol_version;
+    event.http_mcp_method = metadata.mcp_method;
+    event.http_mcp_name = metadata.mcp_name;
+}
+
 pub fn run(config: HttpProxyConfig) -> Result<()> {
     validate_upstream(&config.upstream)?;
 
@@ -79,6 +124,7 @@ fn handle_request(
     let method = request.method().as_str().to_string();
     let request_target = request.url().to_string();
     let upstream_url = build_upstream_url(&config.upstream, &request_target)?;
+    let routing_metadata = collect_request_routing_metadata(request.headers());
 
     let mut request_body = Vec::new();
     request
@@ -98,7 +144,7 @@ fn handle_request(
 
     let request_observed_at = Instant::now();
     if !request_body.is_empty() {
-        let event = observe_http_payload_at(
+        let mut event = observe_http_payload_at(
             &request_body,
             Direction::ClientToServer,
             run_id,
@@ -108,6 +154,7 @@ fn handle_request(
             request_observed_at,
             unix_now_ns(),
         );
+        apply_request_routing_metadata(&mut event, routing_metadata);
         write_event(writer, &event);
     }
 
@@ -294,5 +341,31 @@ mod tests {
         assert!(should_forward_request_header("Mcp-Param-query"));
         assert!(!should_forward_request_header("Host"));
         assert!(!should_forward_request_header("Connection"));
+    }
+
+    #[test]
+    fn routing_metadata_reads_only_allowlisted_unique_headers() {
+        let headers = vec![
+            Header::from_bytes("MCP-Protocol-Version", "2026-07-28").unwrap(),
+            Header::from_bytes("Mcp-Method", "tools/call").unwrap(),
+            Header::from_bytes("Mcp-Name", "add").unwrap(),
+            Header::from_bytes("Authorization", "fixture-auth-marker").unwrap(),
+            Header::from_bytes("Cookie", "fixture-cookie-marker").unwrap(),
+            Header::from_bytes("Mcp-Param-query", "fixture-param-marker").unwrap(),
+            Header::from_bytes("X-App-Secret", "fixture-app-marker").unwrap(),
+        ];
+
+        let metadata = collect_request_routing_metadata(&headers);
+        assert_eq!(metadata.protocol_version.as_deref(), Some("2026-07-28"));
+        assert_eq!(metadata.mcp_method.as_deref(), Some("tools/call"));
+        assert_eq!(metadata.mcp_name.as_deref(), Some("add"));
+
+        let duplicate_method = vec![
+            Header::from_bytes("Mcp-Method", "tools/call").unwrap(),
+            Header::from_bytes("Mcp-Method", "tools/list").unwrap(),
+        ];
+        assert!(collect_request_routing_metadata(&duplicate_method)
+            .mcp_method
+            .is_none());
     }
 }
