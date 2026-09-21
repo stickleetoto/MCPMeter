@@ -8,6 +8,7 @@ mod observer;
 mod proxy;
 mod report;
 mod runs;
+mod sse;
 mod token_ledger;
 mod tokenizer;
 mod tool_cost;
