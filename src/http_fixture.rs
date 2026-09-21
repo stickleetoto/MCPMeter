@@ -1,6 +1,37 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
+use std::io::{self, Read};
 use tiny_http::{Header, Response, Server, StatusCode};
+
+struct FragmentedReader {
+    bytes: Vec<u8>,
+    offset: usize,
+    max_chunk: usize,
+}
+
+impl FragmentedReader {
+    fn new(bytes: Vec<u8>, max_chunk: usize) -> Self {
+        Self {
+            bytes,
+            offset: 0,
+            max_chunk,
+        }
+    }
+}
+
+impl Read for FragmentedReader {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.offset >= self.bytes.len() {
+            return Ok(0);
+        }
+
+        let remaining = self.bytes.len() - self.offset;
+        let amount = remaining.min(self.max_chunk).min(buffer.len());
+        buffer[..amount].copy_from_slice(&self.bytes[self.offset..self.offset + amount]);
+        self.offset += amount;
+        Ok(amount)
+    }
+}
 
 pub fn run(listen: &str) -> Result<()> {
     let server =
@@ -18,6 +49,42 @@ pub fn run(listen: &str) -> Result<()> {
             .context("failed to read HTTP fixture request")?;
 
         let parsed = serde_json::from_str::<Value>(&body);
+
+        if target.contains("case=sse") {
+            let payload = parsed.unwrap_or(Value::Null);
+            let stream = sse_response_for(&payload)?;
+            let headers = vec![
+                Header::from_bytes("Content-Type", "text/event-stream; charset=utf-8").unwrap(),
+                Header::from_bytes("Cache-Control", "no-cache").unwrap(),
+                Header::from_bytes("X-Fixture-Target", target.clone()).unwrap(),
+                Header::from_bytes(
+                    "X-Fixture-Mcp-Method",
+                    if mcp_method.is_empty() {
+                        "missing"
+                    } else {
+                        &mcp_method
+                    },
+                )
+                .unwrap(),
+                Header::from_bytes(
+                    "X-Fixture-Authorization",
+                    if auth_present { "present" } else { "missing" },
+                )
+                .unwrap(),
+            ];
+            let response = Response::new(
+                StatusCode(200),
+                headers,
+                FragmentedReader::new(stream, 5),
+                None,
+                None,
+            );
+            request
+                .respond(response)
+                .context("failed to send HTTP fixture SSE response")?;
+            continue;
+        }
+
         let (status, payload) = match parsed {
             Ok(value) => response_for(value),
             Err(error) => (
@@ -59,6 +126,45 @@ pub fn run(listen: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn sse_response_for(value: &Value) -> Result<Vec<u8>> {
+    let id = value.get("id").cloned().unwrap_or(Value::Null);
+    let result_text = match value
+        .pointer("/params/name")
+        .and_then(Value::as_str)
+    {
+        Some("add") => {
+            let a = value
+                .pointer("/params/arguments/a")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            let b = value
+                .pointer("/params/arguments/b")
+                .and_then(Value::as_i64)
+                .unwrap_or(0);
+            (a + b).to_string()
+        }
+        Some("echo") => value
+            .pointer("/params/arguments/text")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        _ => "ok".to_string(),
+    };
+
+    let notification = serde_json::to_string(&json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/progress",
+        "params": {"progress": 1, "message": "진행"}
+    }))?;
+    let id = serde_json::to_string(&id)?;
+    let result_text = serde_json::to_string(&result_text)?;
+
+    Ok(format!(
+        ": keepalive\r\n\r\ndata: {notification}\r\n\r\ndata: {{\"jsonrpc\":\"2.0\",\"id\":{id},\r\ndata: \"result\":{{\"content\":[{{\"type\":\"text\",\"text\":{result_text}}}]}}}}\r\n\r\n"
+    )
+    .into_bytes())
 }
 
 fn response_for(value: Value) -> (u16, Value) {
@@ -178,6 +284,23 @@ fn header_value(request: &tiny_http::Request, name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sse_fixture_contains_notification_and_response() {
+        let stream = sse_response_for(&json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {"name": "add", "arguments": {"a": 20, "b": 22}}
+        }))
+        .unwrap();
+        let text = String::from_utf8(stream).unwrap();
+
+        assert!(text.contains("notifications/progress"));
+        assert!(text.contains("\"id\":7"));
+        assert!(text.contains("\"text\":\"42\""));
+        assert!(text.contains("data: "));
+    }
 
     #[test]
     fn add_fixture_is_deterministic() {
