@@ -2,18 +2,21 @@
 
 MCPMeter writes append-friendly JSON Lines (`.jsonl`) traces.
 
-The current emitted event schema version is **4**. Schema v2 added an explicit `transport` discriminator. Schema v3 added explicitly scoped `payload_bytes` so application payload size is not conflated with transport framing. Schema v4 makes `wire_bytes` optional so non-stdio transports can represent that metric as unavailable instead of inventing a value.
+The current emitted event schema version is **5**. Schema v2 added an explicit `transport` discriminator. Schema v3 added explicitly scoped `payload_bytes` so application payload size is not conflated with transport framing. Schema v4 makes `wire_bytes` optional so non-stdio transports can represent that metric as unavailable instead of inventing a value. Schema v5 adds optional Streamable HTTP request routing metadata for the allowlisted `MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` request headers.
 
-Schema v1, v2, and v3 traces remain readable. Missing `transport` defaults to `stdio`, and missing `payload_bytes` remains unknown rather than being guessed.
+Schema v1, v2, v3, and v4 traces remain readable. Missing `transport` defaults to `stdio`, and missing `payload_bytes` remains unknown rather than being guessed.
 
 ## Event fields
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `schema_version` | integer | Trace event schema version. New events use `4`; v1, v2, and v3 remain readable. |
+| `schema_version` | integer | Trace event schema version. New events use `5`; v1, v2, v3, and v4 remain readable. |
 | `run_id` | string | Identifier shared by all events from one proxy process. |
 | `ts_unix_ns` | integer | Wall-clock observation timestamp in Unix nanoseconds. |
 | `transport` | string | `stdio` or `streamable_http`. Missing in v1 and defaults to `stdio` when read. |
+| `http_mcp_protocol_version` | string, optional | HTTP request routing metadata from the allowlisted `MCP-Protocol-Version` header. Omitted when unavailable. |
+| `http_mcp_method` | string, optional | HTTP request routing metadata from the allowlisted `Mcp-Method` header. Omitted when unavailable. |
+| `http_mcp_name` | string, optional | HTTP request routing metadata from the allowlisted `Mcp-Name` header. Omitted when unavailable. |
 | `direction` | string | `client_to_server` or `server_to_client`. |
 | `kind` | string | Best-effort JSON-RPC classification such as `tools_call_request`, `tools_call_response`, `tools_list_request`, `tools_list_response`, `notification`, `batch`, or `malformed`. |
 | `wire_bytes` | integer, optional | Exact bytes in the observed **stdio frame**, including its newline transport delimiter when present. This field's stdio meaning must not be reused for HTTP body bytes. |
@@ -34,6 +37,8 @@ Schema v1, v2, and v3 traces remain readable. Missing `transport` defaults to `s
 | `latencies_us` | array | Correlated request-to-response stdio-boundary latencies in microseconds. Batch frames can contain multiple samples. |
 | `ok` | boolean | `false` for malformed frames and JSON-RPC error responses. |
 | `parse_error` | string, optional | Parse error detail when the observed payload is malformed. |
+
+The three `http_mcp_*` fields are HTTP request routing metadata only. They are emitted only when the corresponding allowlisted routing value is available and are otherwise omitted.
 
 ## Exact versus derived metrics
 
@@ -69,15 +74,17 @@ Those quantities must not be inferred from `serialized_tokens` or `wire_bytes` w
 
 ## Schema compatibility
 
-Schema v4 preserves existing stdio measurements while allowing non-stdio traces to omit unavailable wire-byte metrics:
+Schema v5 preserves existing stdio measurements while allowing non-stdio traces to omit unavailable wire-byte metrics and HTTP request events to carry narrowly scoped routing metadata:
 
-- writers emit `transport: "stdio"`;
+- writers emit `transport: "stdio"` for stdio events;
 - v1 files without `transport` deserialize as stdio;
 - v1/v2 files without `payload_bytes` deserialize with that metric unavailable;
 - v1-v3 numeric `wire_bytes` values deserialize as present exact stdio measurements;
 - non-stdio events may omit `wire_bytes` when MCPMeter has not measured an actual network boundary;
 - new stdio events set `payload_bytes` to the frame size excluding the newline delimiter;
 - the meanings of `wire_bytes`, `serialized_tokens`, and `latencies_us` are unchanged for stdio;
+- schema v5 Streamable HTTP request events may include `http_mcp_protocol_version`, `http_mcp_method`, and `http_mcp_name`;
+- the HTTP routing metadata fields are omitted when their values are unavailable, and stdio or HTTP response events do not synthesize them;
 - future HTTP body/SSE accounting uses `payload_bytes` or more-specific HTTP fields rather than pretending application bytes are network wire bytes.
 
 ## Streamable HTTP schema rule
@@ -86,7 +93,8 @@ The HTTP trace extension must name its byte and timing boundaries explicitly. In
 
 - HTTP body/SSE payload bytes are application-boundary bytes, not automatically network wire bytes;
 - response headers, first body byte, complete JSON body, SSE message events, and stream close are distinct timing boundaries;
-- sensitive headers and `Mcp-Param-*` values are not persisted by default;
+- `http_mcp_protocol_version`, `http_mcp_method`, and `http_mcp_name` are HTTP request routing metadata only and are omitted when unavailable;
+- `Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization`, `Mcp-Param-*`, and arbitrary headers are not persisted as default routing metadata;
 - long-lived streams are observed incrementally and are never buffered solely to produce a trace.
 
 See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md).

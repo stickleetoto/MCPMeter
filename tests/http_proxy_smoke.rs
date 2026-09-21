@@ -112,10 +112,7 @@ fn direct_json_http_proxy_forwards_and_measures_tool_call() {
     assert_eq!(request_event["kind"], "tools_call_request");
     assert_eq!(request_event["tools"][0], "add");
     assert_eq!(request_event["payload_bytes"], body.len() as u64);
-    assert_eq!(
-        request_event["http_mcp_protocol_version"],
-        "2026-07-28"
-    );
+    assert_eq!(request_event["http_mcp_protocol_version"], "2026-07-28");
     assert_eq!(request_event["http_mcp_method"], "tools/call");
     assert_eq!(request_event["http_mcp_name"], "add");
 
