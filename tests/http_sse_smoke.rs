@@ -67,11 +67,9 @@ fn sse_http_proxy_streams_and_classifies_json_rpc_events() {
     );
 
     let (headers, response_body) = split_response(&response);
-    assert!(
-        headers
-            .to_ascii_lowercase()
-            .contains("content-type: text/event-stream")
-    );
+    assert!(headers
+        .to_ascii_lowercase()
+        .contains("content-type: text/event-stream"));
     assert!(response_body.contains(": keepalive"));
     assert!(response_body.contains("notifications/progress"));
     assert!(response_body.contains("\"id\":7"));
