@@ -1,9 +1,11 @@
 use crate::event::{Direction, MeasurementEvent};
 use crate::observer::{observe_http_payload_at, unix_now_ns, PendingMap};
+use crate::sse::SseParser;
 use crate::tokenizer::TokenizerProfile;
 use anyhow::{anyhow, bail, Context, Result};
+use serde_json::Value;
 use std::fs::{create_dir_all, File, OpenOptions};
-use std::io::{BufWriter, Read, Write};
+use std::io::{self, BufWriter, Read, Write};
 use std::path::PathBuf;
 use std::time::Instant;
 use tiny_http::{Header, Request, Response, Server, StatusCode};
@@ -61,6 +63,94 @@ fn apply_request_routing_metadata(
     event.http_mcp_protocol_version = metadata.protocol_version;
     event.http_mcp_method = metadata.mcp_method;
     event.http_mcp_name = metadata.mcp_name;
+}
+
+struct SseObservingReader<'a, R: Read> {
+    inner: R,
+    parser: SseParser,
+    run_id: &'a str,
+    tokenizer: &'a TokenizerProfile,
+    capture_payloads: bool,
+    pending: &'a mut PendingMap,
+    writer: &'a mut BufWriter<File>,
+    finished: bool,
+}
+
+impl<'a, R: Read> SseObservingReader<'a, R> {
+    fn new(
+        inner: R,
+        run_id: &'a str,
+        tokenizer: &'a TokenizerProfile,
+        capture_payloads: bool,
+        pending: &'a mut PendingMap,
+        writer: &'a mut BufWriter<File>,
+    ) -> Self {
+        Self {
+            inner,
+            parser: SseParser::default(),
+            run_id,
+            tokenizer,
+            capture_payloads,
+            pending,
+            writer,
+            finished: false,
+        }
+    }
+
+    fn observe_events(&mut self, payloads: Vec<Vec<u8>>) {
+        for payload in payloads {
+            if !is_json_rpc_payload(&payload) {
+                continue;
+            }
+
+            let event = observe_http_payload_at(
+                &payload,
+                Direction::ServerToClient,
+                self.run_id,
+                self.tokenizer,
+                self.capture_payloads,
+                self.pending,
+                Instant::now(),
+                unix_now_ns(),
+            );
+            write_event(self.writer, &event);
+        }
+    }
+}
+
+impl<R: Read> Read for SseObservingReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let read = self.inner.read(buffer)?;
+
+        if read == 0 {
+            if !self.finished {
+                self.finished = true;
+                let payloads = self.parser.finish();
+                self.observe_events(payloads);
+            }
+            return Ok(0);
+        }
+
+        let payloads = self.parser.push(&buffer[..read]);
+        self.observe_events(payloads);
+        Ok(read)
+    }
+}
+
+fn is_json_rpc_payload(payload: &[u8]) -> bool {
+    match serde_json::from_slice::<Value>(payload) {
+        Ok(Value::Object(object)) => object.get("jsonrpc").and_then(Value::as_str) == Some("2.0"),
+        Ok(Value::Array(items)) => {
+            !items.is_empty()
+                && items.iter().all(|item| {
+                    item.as_object()
+                        .and_then(|object| object.get("jsonrpc"))
+                        .and_then(Value::as_str)
+                        == Some("2.0")
+                })
+        }
+        _ => false,
+    }
 }
 
 pub fn run(config: HttpProxyConfig) -> Result<()> {
@@ -192,23 +282,28 @@ fn handle_request(
         .unwrap_or("")
         .to_ascii_lowercase();
 
+    let response_headers = collect_response_headers(&upstream_response);
+
     if content_type
         .split(';')
         .next()
         .is_some_and(|value| value.trim() == "text/event-stream")
     {
+        let reader = SseObservingReader::new(
+            upstream_response.into_reader(),
+            run_id,
+            &config.tokenizer,
+            config.capture_payloads,
+            pending,
+            writer,
+        );
+        let response = Response::new(StatusCode(status), response_headers, reader, None, None);
         request
-            .respond(
-                Response::from_string(
-                    "MCPMeter: SSE forwarding is not enabled in this direct-JSON slice",
-                )
-                .with_status_code(StatusCode(501)),
-            )
-            .context("failed to return SSE-not-supported response")?;
+            .respond(response)
+            .context("failed to stream upstream SSE response")?;
         return Ok(());
     }
 
-    let response_headers = collect_response_headers(&upstream_response);
     let mut response_body = Vec::new();
     upstream_response
         .into_reader()
@@ -341,6 +436,18 @@ mod tests {
         assert!(should_forward_request_header("Mcp-Param-query"));
         assert!(!should_forward_request_header("Host"));
         assert!(!should_forward_request_header("Connection"));
+    }
+
+    #[test]
+    fn recognizes_only_json_rpc_sse_payloads() {
+        assert!(is_json_rpc_payload(
+            br#"{"jsonrpc":"2.0","id":1,"result":{}}"#
+        ));
+        assert!(is_json_rpc_payload(
+            br#"[{"jsonrpc":"2.0","method":"notifications/progress"}]"#
+        ));
+        assert!(!is_json_rpc_payload(br#"{"event":"not-json-rpc"}"#));
+        assert!(!is_json_rpc_payload(b"plain text"));
     }
 
     #[test]
