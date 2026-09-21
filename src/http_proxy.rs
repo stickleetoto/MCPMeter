@@ -3,11 +3,11 @@ use crate::observer::{observe_http_payload_at, unix_now_ns, PendingMap};
 use crate::sse::SseParser;
 use crate::tokenizer::TokenizerProfile;
 use anyhow::{anyhow, bail, Context, Result};
+use serde_json::Value;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::path::PathBuf;
 use std::time::Instant;
-use serde_json::Value;
 use tiny_http::{Header, Request, Response, Server, StatusCode};
 
 const MAX_DIRECT_BODY_BYTES: u64 = 64 * 1024 * 1024;
@@ -139,9 +139,7 @@ impl<R: Read> Read for SseObservingReader<'_, R> {
 
 fn is_json_rpc_payload(payload: &[u8]) -> bool {
     match serde_json::from_slice::<Value>(payload) {
-        Ok(Value::Object(object)) => {
-            object.get("jsonrpc").and_then(Value::as_str) == Some("2.0")
-        }
+        Ok(Value::Object(object)) => object.get("jsonrpc").and_then(Value::as_str) == Some("2.0"),
         Ok(Value::Array(items)) => {
             !items.is_empty()
                 && items.iter().all(|item| {
@@ -299,13 +297,7 @@ fn handle_request(
             pending,
             writer,
         );
-        let response = Response::new(
-            StatusCode(status),
-            response_headers,
-            reader,
-            None,
-            None,
-        );
+        let response = Response::new(StatusCode(status), response_headers, reader, None, None);
         request
             .respond(response)
             .context("failed to stream upstream SSE response")?;
