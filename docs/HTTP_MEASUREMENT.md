@@ -119,7 +119,26 @@ This is the primary implementation target. It is stateless at the protocol layer
 
 ### 2025-era traffic
 
-The reverse proxy should avoid breaking legacy Streamable HTTP traffic when it can transparently relay it, including session headers and legacy streams. Legacy-specific semantic analysis can be added after the modern measurement path is stable.
+MCPMeter treats 2025-era Streamable HTTP as **best-effort transparent relay**, not as a session manager.
+
+Current behavior:
+
+- request methods, path/query, and ordinary end-to-end headers are forwarded unless they are hop-by-hop transport headers;
+- legacy session headers such as `Mcp-Session-Id` are therefore relayed when supplied by the client or server;
+- session identifiers are **not persisted as trace metadata**, used as run identifiers, or interpreted by MCPMeter;
+- direct JSON responses are measured with the same application-payload/token semantics as modern traffic;
+- SSE responses are forwarded incrementally and complete JSON-RPC values reconstructed from `data:` fields are measured;
+- GET/DELETE or other legacy transport operations are forwarded to the upstream server rather than implemented by MCPMeter itself.
+
+Limitations:
+
+- MCPMeter does not perform the legacy initialization handshake on behalf of a client;
+- it does not create, renew, validate, recover, or terminate MCP sessions;
+- it does not provide session affinity or reconnect/resumption logic;
+- it does not reinterpret the older standalone SSE transport (for example a separate `/sse` + message endpoint) into Streamable HTTP;
+- routing metadata fields introduced for the modern transport remain limited to their explicit safe allowlist and do not expose session IDs or arbitrary headers.
+
+The compatibility goal is therefore simple: when a legacy client and server already understand each other, MCPMeter should avoid changing their HTTP semantics while measuring observable JSON/SSE payloads.
 
 ## Acceptance rule
 
@@ -128,3 +147,18 @@ An HTTP metric may ship only when its name and documentation answer:
 > Exactly which boundary did MCPMeter observe to produce this number?
 
 If that answer is ambiguous, the metric is not ready.
+
+
+## Implemented transport status
+
+The v0.2 HTTP path now supports:
+
+- direct JSON reverse-proxy measurement;
+- exact HTTP application `payload_bytes` without pretending they are network `wire_bytes`;
+- safe allowlisted modern routing metadata;
+- incremental SSE pass-through without full-stream buffering;
+- SSE comment/keepalive tolerance and multi-line `data:` reconstruction;
+- JSON-RPC classification, token measurement, and request/response correlation for complete SSE data payloads;
+- deterministic Linux and Windows regression fixtures.
+
+For SSE, raw capture (when explicitly enabled) stores the reconstructed JSON-RPC `data:` payload being measured, not the complete SSE framing or arbitrary stream chunks.
