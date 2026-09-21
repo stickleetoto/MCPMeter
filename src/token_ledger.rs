@@ -182,10 +182,13 @@ mod tests {
         schema_tokens: Option<u64>,
     ) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 4,
+            schema_version: 5,
             run_id: "run".to_string(),
             ts_unix_ns,
             transport: TransportKind::Stdio,
+            http_mcp_protocol_version: None,
+            http_mcp_method: None,
+            http_mcp_name: None,
             direction,
             kind: "message".to_string(),
             wire_bytes: Some(2),

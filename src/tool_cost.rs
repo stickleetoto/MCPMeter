@@ -274,10 +274,13 @@ mod tests {
         payload_bytes: Option<u64>,
     ) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 4,
+            schema_version: 5,
             run_id: "run".to_string(),
             ts_unix_ns: 1,
             transport: TransportKind::Stdio,
+            http_mcp_protocol_version: None,
+            http_mcp_method: None,
+            http_mcp_name: None,
             direction,
             kind: kind.to_string(),
             wire_bytes,

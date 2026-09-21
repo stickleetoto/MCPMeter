@@ -53,10 +53,13 @@ mod tests {
 
     fn event(run_id: &str, ts: u128) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 4,
+            schema_version: 5,
             run_id: run_id.to_string(),
             ts_unix_ns: ts,
             transport: TransportKind::Stdio,
+            http_mcp_protocol_version: None,
+            http_mcp_method: None,
+            http_mcp_name: None,
             direction: Direction::ClientToServer,
             kind: "request".to_string(),
             wire_bytes: Some(2),
@@ -111,11 +114,14 @@ mod tests {
     }
 
     #[test]
-    fn serialized_v4_event_names_transport_and_payload_bytes() {
+    fn serialized_v5_stdio_event_omits_http_routing_metadata() {
         let value = serde_json::to_value(event("current", 1)).unwrap();
-        assert_eq!(value["schema_version"], serde_json::json!(4));
+        assert_eq!(value["schema_version"], serde_json::json!(5));
         assert_eq!(value["transport"], serde_json::json!("stdio"));
         assert_eq!(value["payload_bytes"], serde_json::json!(1));
+        assert!(value.get("http_mcp_protocol_version").is_none());
+        assert!(value.get("http_mcp_method").is_none());
+        assert!(value.get("http_mcp_name").is_none());
     }
 
     #[test]

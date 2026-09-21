@@ -132,10 +132,13 @@ mod tests {
 
     fn event(run_id: &str, ts: u128, tokens: u64) -> MeasurementEvent {
         MeasurementEvent {
-            schema_version: 4,
+            schema_version: 5,
             run_id: run_id.to_string(),
             ts_unix_ns: ts,
             transport: TransportKind::Stdio,
+            http_mcp_protocol_version: None,
+            http_mcp_method: None,
+            http_mcp_name: None,
             direction: Direction::ClientToServer,
             kind: "request".to_string(),
             wire_bytes: Some(10),

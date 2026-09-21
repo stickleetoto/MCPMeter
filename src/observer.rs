@@ -106,10 +106,13 @@ pub fn observe_payload_at(
     let kind = classify_kind(root_is_batch, parse_error.is_some(), &facts);
 
     MeasurementEvent {
-        schema_version: 4,
+        schema_version: 5,
         run_id: run_id.to_string(),
         ts_unix_ns,
         transport: TransportKind::Stdio,
+        http_mcp_protocol_version: None,
+        http_mcp_method: None,
+        http_mcp_name: None,
         direction,
         kind,
         wire_bytes: Some(payload.len() as u64),
