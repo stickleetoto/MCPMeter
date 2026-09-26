@@ -10,6 +10,10 @@ pub struct ToolCostSummary {
     pub run_id: String,
     pub tokenizer: String,
     pub token_count_estimated: bool,
+    pub batch_request_events: u64,
+    pub batch_tool_calls: u64,
+    pub non_batch_tool_calls: u64,
+    pub batch_cost_attribution: String,
     pub tools: Vec<ToolCost>,
     pub unattributed_batch_request_tokens: u64,
     pub unattributed_batch_response_tokens: u64,
@@ -23,6 +27,8 @@ pub struct ToolCostSummary {
 pub struct ToolCost {
     pub tool: String,
     pub calls: u64,
+    pub batch_calls: u64,
+    pub non_batch_calls: u64,
     pub request_tokens: u64,
     pub response_tokens: u64,
     pub total_tokens: u64,
@@ -41,6 +47,8 @@ pub struct ToolCost {
 
 struct ToolAccumulator {
     calls: u64,
+    batch_calls: u64,
+    non_batch_calls: u64,
     request_tokens: u64,
     response_tokens: u64,
     request_wire_bytes: Option<u64>,
@@ -55,6 +63,8 @@ impl Default for ToolAccumulator {
     fn default() -> Self {
         Self {
             calls: 0,
+            batch_calls: 0,
+            non_batch_calls: 0,
             request_tokens: 0,
             response_tokens: 0,
             request_wire_bytes: Some(0),
@@ -82,6 +92,9 @@ fn summarize_selected(run_id: String, selected: &[&MeasurementEvent]) -> Result<
 
     let token_count_estimated = selected.iter().any(|event| event.token_count_estimated);
     let mut accumulators: BTreeMap<String, ToolAccumulator> = BTreeMap::new();
+    let mut batch_request_events = 0;
+    let mut batch_tool_calls = 0;
+    let mut non_batch_tool_calls = 0;
     let mut batch_req_tokens = 0;
     let mut batch_res_tokens = 0;
     let mut batch_req_wire = Some(0);
@@ -92,27 +105,64 @@ fn summarize_selected(run_id: String, selected: &[&MeasurementEvent]) -> Result<
     for event in selected {
         match event.direction {
             Direction::ClientToServer if event.tool_call_count > 0 => {
-                if event.kind == "batch" || event.tools.len() != 1 {
-                    for tool in &event.tools {
-                        accumulators.entry(tool.clone()).or_default().calls += 1;
+                if event.kind == "batch" {
+                    batch_request_events += 1;
+                    batch_tool_calls += event.tool_call_count;
+                    record_tool_calls(
+                        &mut accumulators,
+                        &event.tools,
+                        event.tool_call_count,
+                        true,
+                    );
+
+                    if let Some(tool) = attributable_batch_request_tool(event) {
+                        let accumulator = accumulators.entry(tool.to_string()).or_default();
+                        accumulator.request_tokens += event.serialized_tokens;
+                        add_optional(&mut accumulator.request_wire_bytes, event.wire_bytes);
+                        add_optional(&mut accumulator.request_payload_bytes, event.payload_bytes);
+                    } else {
+                        batch_req_tokens += event.serialized_tokens;
+                        add_optional(&mut batch_req_wire, event.wire_bytes);
+                        add_optional(&mut batch_req_payload, event.payload_bytes);
                     }
-                    batch_req_tokens += event.serialized_tokens;
-                    add_optional(&mut batch_req_wire, event.wire_bytes);
-                    add_optional(&mut batch_req_payload, event.payload_bytes);
-                } else if let Some(tool) = event.tools.first() {
-                    let accumulator = accumulators.entry(tool.clone()).or_default();
+                } else if event.tools.len() == 1 {
+                    non_batch_tool_calls += event.tool_call_count;
+                    let accumulator = accumulators.entry(event.tools[0].clone()).or_default();
                     accumulator.calls += event.tool_call_count;
+                    accumulator.non_batch_calls += event.tool_call_count;
                     accumulator.request_tokens += event.serialized_tokens;
                     add_optional(&mut accumulator.request_wire_bytes, event.wire_bytes);
                     add_optional(&mut accumulator.request_payload_bytes, event.payload_bytes);
+                } else {
+                    non_batch_tool_calls += event.tool_call_count;
+                    record_tool_calls(
+                        &mut accumulators,
+                        &event.tools,
+                        event.tool_call_count,
+                        false,
+                    );
+                    batch_req_tokens += event.serialized_tokens;
+                    add_optional(&mut batch_req_wire, event.wire_bytes);
+                    add_optional(&mut batch_req_payload, event.payload_bytes);
                 }
             }
             Direction::ServerToClient if !event.tools.is_empty() => {
-                if event.kind == "batch" || event.tools.len() != 1 {
-                    batch_res_tokens += event.serialized_tokens;
-                    add_optional(&mut batch_res_wire, event.wire_bytes);
-                    add_optional(&mut batch_res_payload, event.payload_bytes);
-                } else if event.kind == "tools_call_response" {
+                if event.kind == "batch" {
+                    if let Some(tool) = attributable_batch_response_tool(event) {
+                        let accumulator = accumulators.entry(tool.to_string()).or_default();
+                        accumulator.response_tokens += event.serialized_tokens;
+                        add_optional(&mut accumulator.response_wire_bytes, event.wire_bytes);
+                        add_optional(&mut accumulator.response_payload_bytes, event.payload_bytes);
+                        accumulator.error_responses += u64::from(!event.ok);
+                        accumulator
+                            .latencies_us
+                            .extend(event.latencies_us.iter().copied());
+                    } else {
+                        batch_res_tokens += event.serialized_tokens;
+                        add_optional(&mut batch_res_wire, event.wire_bytes);
+                        add_optional(&mut batch_res_payload, event.payload_bytes);
+                    }
+                } else if event.tools.len() == 1 && event.kind == "tools_call_response" {
                     let accumulator = accumulators.entry(event.tools[0].clone()).or_default();
                     accumulator.response_tokens += event.serialized_tokens;
                     add_optional(&mut accumulator.response_wire_bytes, event.wire_bytes);
@@ -121,6 +171,10 @@ fn summarize_selected(run_id: String, selected: &[&MeasurementEvent]) -> Result<
                     accumulator
                         .latencies_us
                         .extend(event.latencies_us.iter().copied());
+                } else if event.tools.len() != 1 {
+                    batch_res_tokens += event.serialized_tokens;
+                    add_optional(&mut batch_res_wire, event.wire_bytes);
+                    add_optional(&mut batch_res_payload, event.payload_bytes);
                 }
             }
             _ => {}
@@ -134,6 +188,8 @@ fn summarize_selected(run_id: String, selected: &[&MeasurementEvent]) -> Result<
             ToolCost {
                 tool,
                 calls: accumulator.calls,
+                batch_calls: accumulator.batch_calls,
+                non_batch_calls: accumulator.non_batch_calls,
                 request_tokens: accumulator.request_tokens,
                 response_tokens: accumulator.response_tokens,
                 total_tokens: accumulator.request_tokens + accumulator.response_tokens,
@@ -162,6 +218,10 @@ fn summarize_selected(run_id: String, selected: &[&MeasurementEvent]) -> Result<
         run_id,
         tokenizer,
         token_count_estimated,
+        batch_request_events,
+        batch_tool_calls,
+        non_batch_tool_calls,
+        batch_cost_attribution: "only fully recorded single-tool batch messages are attributed; shared or mixed batch message cost remains unattributed".to_string(),
         tools,
         unattributed_batch_request_tokens: batch_req_tokens,
         unattributed_batch_response_tokens: batch_res_tokens,
@@ -189,15 +249,25 @@ pub fn print_text(summary: &ToolCostSummary) {
         println!("No tool calls found.");
     } else {
         println!(
-            "{:<28} {:>7} {:>11} {:>11} {:>11} {:>10} {:>8}",
-            "Tool", "Calls", "Req tok", "Resp tok", "Total tok", "p95 ms", "Errors"
+            "{:<24} {:>7} {:>7} {:>7} {:>11} {:>11} {:>11} {:>10} {:>8}",
+            "Tool",
+            "Calls",
+            "Direct",
+            "Batch",
+            "Req tok",
+            "Resp tok",
+            "Total tok",
+            "p95 ms",
+            "Errors"
         );
-        println!("{}", "-".repeat(94));
+        println!("{}", "-".repeat(112));
         for tool in &summary.tools {
             println!(
-                "{:<28} {:>7} {:>11} {:>11} {:>11} {:>10} {:>8}",
+                "{:<24} {:>7} {:>7} {:>7} {:>11} {:>11} {:>11} {:>10} {:>8}",
                 tool.tool,
                 tool.calls,
+                tool.non_batch_calls,
+                tool.batch_calls,
                 tool.request_tokens,
                 tool.response_tokens,
                 tool.total_tokens,
@@ -207,11 +277,20 @@ pub fn print_text(summary: &ToolCostSummary) {
         }
     }
 
+    if summary.batch_request_events > 0 {
+        println!();
+        println!(
+            "Batch tool selection: {} request event(s), {} tool call(s)",
+            summary.batch_request_events, summary.batch_tool_calls
+        );
+        println!("Batch cost attribution: {}", summary.batch_cost_attribution);
+    }
+
     if summary.unattributed_batch_request_tokens > 0
         || summary.unattributed_batch_response_tokens > 0
     {
         println!();
-        println!("Batch payload cost not attributed to individual tools:");
+        println!("Shared/mixed batch cost not attributed to individual tools:");
         println!(
             "  request:  {} tokens / {} payload bytes / {} wire bytes",
             summary.unattributed_batch_request_tokens,
@@ -225,6 +304,62 @@ pub fn print_text(summary: &ToolCostSummary) {
             optional_u64(summary.unattributed_batch_response_wire_bytes)
         );
     }
+}
+
+fn record_tool_calls(
+    accumulators: &mut BTreeMap<String, ToolAccumulator>,
+    tools: &[String],
+    tool_call_count: u64,
+    batch: bool,
+) {
+    if tools.len() == 1 {
+        let accumulator = accumulators.entry(tools[0].clone()).or_default();
+        accumulator.calls += tool_call_count;
+        if batch {
+            accumulator.batch_calls += tool_call_count;
+        } else {
+            accumulator.non_batch_calls += tool_call_count;
+        }
+        return;
+    }
+
+    for tool in tools {
+        let accumulator = accumulators.entry(tool.clone()).or_default();
+        accumulator.calls += 1;
+        if batch {
+            accumulator.batch_calls += 1;
+        } else {
+            accumulator.non_batch_calls += 1;
+        }
+    }
+}
+
+fn single_recorded_tool(tools: &[String]) -> Option<&str> {
+    let first = tools.first()?;
+    tools
+        .iter()
+        .all(|tool| tool == first)
+        .then_some(first.as_str())
+}
+
+fn attributable_batch_request_tool(event: &MeasurementEvent) -> Option<&str> {
+    if event.request_count != event.tool_call_count
+        || event.response_count != 0
+        || event.notification_count != 0
+    {
+        return None;
+    }
+    single_recorded_tool(&event.tools)
+}
+
+fn attributable_batch_response_tool(event: &MeasurementEvent) -> Option<&str> {
+    if event.request_count != 0
+        || event.notification_count != 0
+        || event.response_count != event.tools.len() as u64
+    {
+        return None;
+    }
+    single_recorded_tool(&event.tools)
 }
 
 fn add_optional(total: &mut Option<u64>, value: Option<u64>) {
@@ -292,8 +427,16 @@ mod tests {
             raw_payload: None,
             methods: Vec::new(),
             tools: tools.iter().map(|tool| (*tool).to_string()).collect(),
-            request_count: u64::from(matches!(direction, Direction::ClientToServer)),
-            response_count: u64::from(matches!(direction, Direction::ServerToClient)),
+            request_count: if matches!(direction, Direction::ClientToServer) {
+                tool_call_count.max(1)
+            } else {
+                0
+            },
+            response_count: if matches!(direction, Direction::ServerToClient) {
+                tools.len().max(1) as u64
+            } else {
+                0
+            },
             notification_count: 0,
             tool_call_count,
             tools_exposed: None,
@@ -332,6 +475,8 @@ mod tests {
         let add = &summary.tools[0];
         assert_eq!(add.tool, "add");
         assert_eq!(add.calls, 1);
+        assert_eq!(add.batch_calls, 0);
+        assert_eq!(add.non_batch_calls, 1);
         assert_eq!(add.total_tokens, 16);
         assert_eq!(add.total_wire_bytes, Some(64));
         assert_eq!(add.total_payload_bytes, Some(62));
@@ -377,9 +522,70 @@ mod tests {
         );
         let summary = summarize_selected("run".to_string(), &[&batch]).unwrap();
         assert_eq!(summary.tools.len(), 2);
+        assert_eq!(summary.batch_request_events, 1);
+        assert_eq!(summary.batch_tool_calls, 2);
         assert_eq!(summary.tools[0].calls, 1);
+        assert_eq!(summary.tools[0].batch_calls, 1);
         assert_eq!(summary.tools[1].calls, 1);
+        assert_eq!(summary.tools[1].batch_calls, 1);
         assert_eq!(summary.unattributed_batch_request_tokens, 100);
         assert_eq!(summary.tools[0].request_tokens, 0);
+    }
+
+    #[test]
+    fn same_tool_batch_cost_is_attributed_when_evidence_is_complete() {
+        let request = event(
+            Direction::ClientToServer,
+            "batch",
+            &["add", "add"],
+            2,
+            100,
+            Some(400),
+            Some(399),
+        );
+        let response = event(
+            Direction::ServerToClient,
+            "batch",
+            &["add", "add"],
+            0,
+            60,
+            Some(240),
+            Some(239),
+        );
+        let summary = summarize_selected("run".to_string(), &[&request, &response]).unwrap();
+        let add = &summary.tools[0];
+
+        assert_eq!(summary.batch_request_events, 1);
+        assert_eq!(summary.batch_tool_calls, 2);
+        assert_eq!(add.calls, 2);
+        assert_eq!(add.batch_calls, 2);
+        assert_eq!(add.non_batch_calls, 0);
+        assert_eq!(add.total_tokens, 160);
+        assert_eq!(add.total_wire_bytes, Some(640));
+        assert_eq!(add.total_payload_bytes, Some(638));
+        assert_eq!(summary.unattributed_batch_request_tokens, 0);
+        assert_eq!(summary.unattributed_batch_response_tokens, 0);
+    }
+
+    #[test]
+    fn batch_with_non_tool_work_keeps_shared_cost_unattributed() {
+        let mut request = event(
+            Direction::ClientToServer,
+            "batch",
+            &["add"],
+            1,
+            100,
+            Some(400),
+            Some(399),
+        );
+        request.request_count = 2;
+
+        let summary = summarize_selected("run".to_string(), &[&request]).unwrap();
+        let add = &summary.tools[0];
+
+        assert_eq!(add.calls, 1);
+        assert_eq!(add.batch_calls, 1);
+        assert_eq!(add.request_tokens, 0);
+        assert_eq!(summary.unattributed_batch_request_tokens, 100);
     }
 }
