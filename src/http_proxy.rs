@@ -483,11 +483,8 @@ mod tests {
             },
         );
 
-        let rules = RedactionRules::parse(
-            &["http-name".to_string()],
-            &["api_key".to_string()],
-        )
-        .unwrap();
+        let rules =
+            RedactionRules::parse(&["http-name".to_string()], &["api_key".to_string()]).unwrap();
 
         let unique = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

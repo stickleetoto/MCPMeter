@@ -210,9 +210,7 @@ fn record_session_with_limit(
     let mut command = Command::new(exe);
     command.arg("proxy").arg("--trace").arg(trace);
     if let Some(limit) = trace_max_bytes {
-        command
-            .arg("--trace-max-bytes")
-            .arg(limit.to_string());
+        command.arg("--trace-max-bytes").arg(limit.to_string());
     }
 
     let mut child = command
