@@ -14,6 +14,7 @@ pub struct ComparisonReport {
     pub tool_calls: U64Delta,
     pub error_events: U64Delta,
     pub schema_tokens: Option<U64Delta>,
+    pub schema_tokens_per_tool: Option<F64Delta>,
     pub tools_exposed: Option<U64Delta>,
     pub latency_p50_ms: Option<F64Delta>,
     pub latency_p95_ms: Option<F64Delta>,
@@ -44,6 +45,15 @@ pub fn compare_reports(baseline: &RunReport, candidate: &RunReport) -> Result<Co
             candidate.tokenizer
         );
     }
+    if baseline.token_count_estimated != candidate.token_count_estimated {
+        bail!(
+            "cannot compare token metrics from different tokenizer profiles: {} is {} while {} is {}",
+            baseline.run_id,
+            token_profile_kind(baseline.token_count_estimated),
+            candidate.run_id,
+            token_profile_kind(candidate.token_count_estimated)
+        );
+    }
 
     Ok(ComparisonReport {
         baseline_run_id: baseline.run_id.clone(),
@@ -59,6 +69,10 @@ pub fn compare_reports(baseline: &RunReport, candidate: &RunReport) -> Result<Co
         tool_calls: delta_u64(baseline.tool_calls, candidate.tool_calls),
         error_events: delta_u64(baseline.error_events, candidate.error_events),
         schema_tokens: zip_u64(baseline.schema_tokens, candidate.schema_tokens),
+        schema_tokens_per_tool: zip_f64(
+            schema_tokens_per_tool(baseline),
+            schema_tokens_per_tool(candidate),
+        ),
         tools_exposed: zip_u64(baseline.tools_exposed, candidate.tools_exposed),
         latency_p50_ms: zip_f64(baseline.latency_p50_ms, candidate.latency_p50_ms),
         latency_p95_ms: zip_f64(baseline.latency_p95_ms, candidate.latency_p95_ms),
@@ -96,6 +110,9 @@ pub fn print_text(report: &ComparisonReport) {
     if let Some(delta) = &report.schema_tokens {
         print_u64_row("Schema tokens", delta);
     }
+    if let Some(delta) = &report.schema_tokens_per_tool {
+        print_f64_row("Schema tok/tool", delta);
+    }
     if let Some(delta) = &report.tools_exposed {
         print_u64_row("Tools exposed", delta);
     }
@@ -107,6 +124,23 @@ pub fn print_text(report: &ComparisonReport) {
     }
     if let Some(delta) = &report.latency_p99_ms {
         print_f64_row("Latency p99 ms", delta);
+    }
+}
+
+fn schema_tokens_per_tool(report: &RunReport) -> Option<f64> {
+    let schema_tokens = report.schema_tokens?;
+    let tools_exposed = report.tools_exposed?;
+    if tools_exposed == 0 {
+        return None;
+    }
+    Some(schema_tokens as f64 / tools_exposed as f64)
+}
+
+fn token_profile_kind(estimated: bool) -> &'static str {
+    if estimated {
+        "estimated"
+    } else {
+        "exact"
     }
 }
 
@@ -220,6 +254,43 @@ mod tests {
         let baseline = report("a", "o200k_base", 1_000);
         let candidate = report("b", "cl100k_base", 800);
         assert!(compare_reports(&baseline, &candidate).is_err());
+    }
+
+    #[test]
+    fn refuses_mismatched_estimation_profiles() {
+        let baseline = report("a", "o200k_base", 1_000);
+        let mut candidate = report("b", "o200k_base", 800);
+        candidate.token_count_estimated = true;
+
+        let error = compare_reports(&baseline, &candidate).unwrap_err();
+        assert!(error.to_string().contains("different tokenizer profiles"));
+    }
+
+    #[test]
+    fn compares_schema_cost_per_exposed_tool() {
+        let mut baseline = report("a", "o200k_base", 1_000);
+        baseline.schema_tokens = Some(120);
+        baseline.tools_exposed = Some(3);
+        let mut candidate = report("b", "o200k_base", 800);
+        candidate.schema_tokens = Some(100);
+        candidate.tools_exposed = Some(4);
+
+        let comparison = compare_reports(&baseline, &candidate).unwrap();
+        let delta = comparison.schema_tokens_per_tool.unwrap();
+        assert_eq!(delta.baseline, 40.0);
+        assert_eq!(delta.candidate, 25.0);
+        assert_eq!(delta.delta, -15.0);
+        assert_eq!(delta.percent, Some(-37.5));
+    }
+
+    #[test]
+    fn zero_exposed_tools_leave_schema_cost_per_tool_unavailable() {
+        let mut baseline = report("a", "o200k_base", 1_000);
+        baseline.tools_exposed = Some(0);
+        let candidate = report("b", "o200k_base", 800);
+
+        let comparison = compare_reports(&baseline, &candidate).unwrap();
+        assert_eq!(comparison.schema_tokens_per_tool, None);
     }
 
     #[test]
