@@ -15,6 +15,9 @@ pub struct RunReport {
     pub responses: u64,
     pub notifications: u64,
     pub tool_calls: u64,
+    pub batch_request_events: u64,
+    pub batch_tool_calls: u64,
+    pub non_batch_tool_calls: u64,
     pub unique_tools: Vec<String>,
     pub tools_exposed: Option<u64>,
     pub schema_tokens: Option<u64>,
@@ -66,6 +69,9 @@ pub fn build_report(path: &Path, requested_run: Option<&str>) -> Result<RunRepor
         responses: 0,
         notifications: 0,
         tool_calls: 0,
+        batch_request_events: 0,
+        batch_tool_calls: 0,
+        non_batch_tool_calls: 0,
         unique_tools: Vec::new(),
         tools_exposed: None,
         schema_tokens: None,
@@ -92,6 +98,14 @@ pub fn build_report(path: &Path, requested_run: Option<&str>) -> Result<RunRepor
         report.responses += event.response_count;
         report.notifications += event.notification_count;
         report.tool_calls += event.tool_call_count;
+        if matches!(event.direction, Direction::ClientToServer) && event.tool_call_count > 0 {
+            if event.kind == "batch" {
+                report.batch_request_events += 1;
+                report.batch_tool_calls += event.tool_call_count;
+            } else {
+                report.non_batch_tool_calls += event.tool_call_count;
+            }
+        }
         report.serialized_tokens_total += event.serialized_tokens;
         if !event.ok {
             report.error_events += 1;
@@ -158,6 +172,11 @@ pub fn print_text(report: &RunReport) {
     );
     println!("Notifications:       {}", report.notifications);
     println!("Tool calls:          {}", report.tool_calls);
+    println!(
+        "Batch requests/calls: {} / {}",
+        report.batch_request_events, report.batch_tool_calls
+    );
+    println!("Non-batch tool calls: {}", report.non_batch_tool_calls);
     println!("Unique tools called: {}", report.unique_tools.len());
     if !report.unique_tools.is_empty() {
         println!("Tools:               {}", report.unique_tools.join(", "));
