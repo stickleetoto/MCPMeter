@@ -76,10 +76,7 @@ impl RedactionRules {
 
         for raw_field in payload_fields {
             let field = raw_field.trim();
-            if field.is_empty()
-                || field.len() > 128
-                || field.chars().any(char::is_control)
-            {
+            if field.is_empty() || field.len() > 128 || field.chars().any(char::is_control) {
                 return Err(
                     "invalid --redact-payload-field rule; use a non-empty JSON key up to 128 characters",
                 );
@@ -159,7 +156,6 @@ fn redact_json_value(value: &mut Value, fields: &BTreeSet<String>) {
         _ => {}
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeasurementEvent {

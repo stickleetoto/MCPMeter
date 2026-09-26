@@ -44,8 +44,9 @@ fn existing_trace_segments(path: &Path) -> Result<Vec<(u64, PathBuf)>> {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(segments),
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("failed to inspect trace directory {}", parent.display()));
+            return Err(error).with_context(|| {
+                format!("failed to inspect trace directory {}", parent.display())
+            });
         }
     };
 
@@ -222,10 +223,7 @@ mod tests {
         let selected = resolve_trace_path(&path, Some(5)).unwrap();
         assert_eq!(
             selected.file_name().unwrap().to_string_lossy(),
-            format!(
-                "{}.1.jsonl",
-                path.file_stem().unwrap().to_string_lossy()
-            )
+            format!("{}.1.jsonl", path.file_stem().unwrap().to_string_lossy())
         );
 
         let _ = fs::remove_file(path);
@@ -270,10 +268,7 @@ mod tests {
         let selected = resolve_trace_path(&path, Some(64)).unwrap();
         assert_eq!(selected, rotated);
 
-        let mut file = fs::OpenOptions::new()
-            .append(true)
-            .open(&selected)
-            .unwrap();
+        let mut file = fs::OpenOptions::new().append(true).open(&selected).unwrap();
         file.write_all(b"{\"b\":2}\n").unwrap();
         drop(file);
 

@@ -132,9 +132,7 @@ fn configured_redaction_applies_before_stdio_trace_write() {
     let event: Value = trace_text
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
-        .find(|event| {
-            event["direction"] == "client_to_server" && event["tool_call_count"] == 1
-        })
+        .find(|event| event["direction"] == "client_to_server" && event["tool_call_count"] == 1)
         .expect("redacted tool request event");
 
     assert!(event.get("tools").is_none());
