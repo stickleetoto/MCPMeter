@@ -53,8 +53,13 @@ fn runs_tools_and_compare_work_end_to_end() {
         .find(|tool| tool["tool"] == "add")
         .expect("add tool cost");
     assert_eq!(add["calls"], 2);
+    assert_eq!(add["batch_calls"], 0);
+    assert_eq!(add["non_batch_calls"], 2);
     assert!(add["request_tokens"].as_u64().unwrap() > 0);
     assert!(add["response_tokens"].as_u64().unwrap() > 0);
+    assert_eq!(tool_cost["batch_request_events"], 0);
+    assert_eq!(tool_cost["batch_tool_calls"], 0);
+    assert_eq!(tool_cost["non_batch_tool_calls"], 2);
     assert_eq!(tool_cost["unattributed_batch_request_tokens"], 0);
     assert_eq!(tool_cost["unattributed_batch_response_tokens"], 0);
 
@@ -83,6 +88,60 @@ fn runs_tools_and_compare_work_end_to_end() {
         comparison["schema_tokens_per_tool"]["delta"].as_f64(),
         Some(0.0)
     );
+
+    let _ = fs::remove_file(trace);
+}
+
+#[test]
+fn tools_keeps_mixed_batch_cost_unattributed() {
+    let exe = env!("CARGO_BIN_EXE_mcp-meter");
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let trace = std::env::temp_dir().join(format!(
+        "mcpmeter-batch-tools-{}-{unique}.jsonl",
+        std::process::id()
+    ));
+
+    record_mixed_tool_batch(exe, &trace);
+
+    let output = Command::new(exe)
+        .arg("tools")
+        .arg(&trace)
+        .arg("--json")
+        .output()
+        .expect("run batch per-tool cost command");
+    assert!(output.status.success());
+
+    let tool_cost: Value = serde_json::from_slice(&output.stdout).expect("parse batch tool cost");
+    assert_eq!(tool_cost["batch_request_events"], 1);
+    assert_eq!(tool_cost["batch_tool_calls"], 2);
+    assert_eq!(tool_cost["non_batch_tool_calls"], 0);
+    assert!(tool_cost["batch_cost_attribution"]
+        .as_str()
+        .unwrap()
+        .contains("shared or mixed"));
+
+    let tools = tool_cost["tools"].as_array().expect("tools array");
+    let add = tools
+        .iter()
+        .find(|tool| tool["tool"] == "add")
+        .expect("add selection");
+    let echo = tools
+        .iter()
+        .find(|tool| tool["tool"] == "echo")
+        .expect("echo selection");
+    for tool in [add, echo] {
+        assert_eq!(tool["calls"], 1);
+        assert_eq!(tool["batch_calls"], 1);
+        assert_eq!(tool["non_batch_calls"], 0);
+        assert_eq!(tool["request_tokens"], 0);
+    }
+    assert!(tool_cost["unattributed_batch_request_tokens"]
+        .as_u64()
+        .unwrap()
+        > 0);
 
     let _ = fs::remove_file(trace);
 }
@@ -194,6 +253,40 @@ fn trace_rotation_selects_and_reopens_numbered_segment() {
 
     let _ = fs::remove_file(trace);
     let _ = fs::remove_file(rotated);
+}
+
+fn record_mixed_tool_batch(exe: &str, trace: &Path) {
+    let mut child = Command::new(exe)
+        .arg("proxy")
+        .arg("--trace")
+        .arg(trace)
+        .arg("--tokenizer")
+        .arg("bytes4-estimate")
+        .arg("--")
+        .arg(exe)
+        .arg("fixture")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn measured fixture");
+
+    let mut stdin = child.stdin.take().expect("proxy stdin");
+    let stdout = child.stdout.take().expect("proxy stdout");
+    let mut reader = BufReader::new(stdout);
+
+    stdin
+        .write_all(
+            br#"[{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"add","arguments":{"a":1,"b":2}}},{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"echo","arguments":{"text":"batch"}}}]
+"#,
+        )
+        .unwrap();
+    stdin.flush().unwrap();
+    read_response(&mut reader);
+
+    drop(stdin);
+    let status = child.wait().expect("wait for measured fixture");
+    assert!(status.success());
 }
 
 fn record_session(exe: &str, trace: &Path, tool_calls: u64, tokenizer: &str) {
