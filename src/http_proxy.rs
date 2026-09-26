@@ -1,4 +1,4 @@
-use crate::event::{Direction, MeasurementEvent};
+use crate::event::{Direction, MeasurementEvent, RedactionRules};
 use crate::observer::{observe_http_payload_at, unix_now_ns, PendingMap};
 use crate::sse::SseParser;
 use crate::tokenizer::TokenizerProfile;
@@ -18,6 +18,7 @@ pub struct HttpProxyConfig {
     pub trace_path: PathBuf,
     pub tokenizer: TokenizerProfile,
     pub capture_payloads: bool,
+    pub redaction_rules: RedactionRules,
 }
 
 #[derive(Debug, Default)]
@@ -71,6 +72,7 @@ struct SseObservingReader<'a, R: Read> {
     run_id: &'a str,
     tokenizer: &'a TokenizerProfile,
     capture_payloads: bool,
+    redaction_rules: &'a RedactionRules,
     pending: &'a mut PendingMap,
     writer: &'a mut BufWriter<File>,
     finished: bool,
@@ -82,6 +84,7 @@ impl<'a, R: Read> SseObservingReader<'a, R> {
         run_id: &'a str,
         tokenizer: &'a TokenizerProfile,
         capture_payloads: bool,
+        redaction_rules: &'a RedactionRules,
         pending: &'a mut PendingMap,
         writer: &'a mut BufWriter<File>,
     ) -> Self {
@@ -91,6 +94,7 @@ impl<'a, R: Read> SseObservingReader<'a, R> {
             run_id,
             tokenizer,
             capture_payloads,
+            redaction_rules,
             pending,
             writer,
             finished: false,
@@ -113,7 +117,7 @@ impl<'a, R: Read> SseObservingReader<'a, R> {
                 Instant::now(),
                 unix_now_ns(),
             );
-            write_event(self.writer, &event);
+            write_event(self.writer, event, self.redaction_rules);
         }
     }
 }
@@ -245,7 +249,7 @@ fn handle_request(
             unix_now_ns(),
         );
         apply_request_routing_metadata(&mut event, routing_metadata);
-        write_event(writer, &event);
+        write_event(writer, event, &config.redaction_rules);
     }
 
     let mut upstream_request = agent.request(&method, &upstream_url);
@@ -294,6 +298,7 @@ fn handle_request(
             run_id,
             &config.tokenizer,
             config.capture_payloads,
+            &config.redaction_rules,
             pending,
             writer,
         );
@@ -332,7 +337,7 @@ fn handle_request(
             Instant::now(),
             unix_now_ns(),
         );
-        write_event(writer, &event);
+        write_event(writer, event, &config.redaction_rules);
     }
 
     let mut downstream_response =
@@ -401,9 +406,14 @@ fn validate_upstream(upstream: &str) -> Result<()> {
     bail!("upstream must start with http:// or https://");
 }
 
-fn write_event(writer: &mut BufWriter<File>, event: &MeasurementEvent) {
+fn write_event(
+    writer: &mut BufWriter<File>,
+    mut event: MeasurementEvent,
+    redaction_rules: &RedactionRules,
+) {
+    redaction_rules.apply(&mut event);
     if let Err(error) = (|| -> Result<()> {
-        serde_json::to_writer(&mut *writer, event)?;
+        serde_json::to_writer(&mut *writer, &event)?;
         writer.write_all(b"\n")?;
         writer.flush()?;
         Ok(())

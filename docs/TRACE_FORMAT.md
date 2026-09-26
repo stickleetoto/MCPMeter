@@ -14,9 +14,9 @@ Schema v1, v2, v3, and v4 traces remain readable. Missing `transport` defaults t
 | `run_id` | string | Identifier shared by all events from one proxy process. |
 | `ts_unix_ns` | integer | Wall-clock observation timestamp in Unix nanoseconds. |
 | `transport` | string | `stdio` or `streamable_http`. Missing in v1 and defaults to `stdio` when read. |
-| `http_mcp_protocol_version` | string, optional | HTTP request routing metadata from the allowlisted `MCP-Protocol-Version` header. Omitted when unavailable. |
-| `http_mcp_method` | string, optional | HTTP request routing metadata from the allowlisted `Mcp-Method` header. Omitted when unavailable. |
-| `http_mcp_name` | string, optional | HTTP request routing metadata from the allowlisted `Mcp-Name` header. Omitted when unavailable. |
+| `http_mcp_protocol_version` | string, optional | HTTP request routing metadata from the allowlisted `MCP-Protocol-Version` header. Omitted when unavailable or redacted. |
+| `http_mcp_method` | string, optional | HTTP request routing metadata from the allowlisted `Mcp-Method` header. Omitted when unavailable or redacted. |
+| `http_mcp_name` | string, optional | HTTP request routing metadata from the allowlisted `Mcp-Name` header. Omitted when unavailable or redacted. |
 | `direction` | string | `client_to_server` or `server_to_client`. |
 | `kind` | string | Best-effort JSON-RPC classification such as `tools_call_request`, `tools_call_response`, `tools_list_request`, `tools_list_response`, `notification`, `batch`, or `malformed`. |
 | `wire_bytes` | integer, optional | Exact bytes in the observed **stdio frame**, including its newline transport delimiter when present. This field's stdio meaning must not be reused for HTTP body bytes. |
@@ -25,9 +25,9 @@ Schema v1, v2, v3, and v4 traces remain readable. Missing `transport` defaults t
 | `tokenizer` | string | Tokenizer profile used for `serialized_tokens`. |
 | `token_count_estimated` | boolean | `true` when the tokenizer profile itself is heuristic. |
 | `payload_sha256` | string | SHA-256 fingerprint of the complete observed frame. |
-| `raw_payload` | string, optional | Raw frame. Absent by default and present only when capture is explicitly enabled. |
-| `methods` | array | JSON-RPC methods observed or correlated in this frame. |
-| `tools` | array | Tool names observed or correlated in this frame. |
+| `raw_payload` | string, optional | Raw frame/body. Absent by default and present only when capture is explicitly enabled. Configured JSON-key redaction is applied before persistence; when a payload cannot be parsed as JSON under an active payload-field rule, raw capture is omitted fail-closed. |
+| `methods` | array | JSON-RPC methods observed or correlated in this frame. May be omitted by configured metadata redaction. |
+| `tools` | array | Tool names observed or correlated in this frame. May be omitted by configured metadata redaction. |
 | `request_count` | integer | Number of JSON-RPC request objects observed in the frame. |
 | `response_count` | integer | Number of JSON-RPC response objects observed in the frame. |
 | `notification_count` | integer | Number of JSON-RPC notifications observed in the frame. |
@@ -39,6 +39,32 @@ Schema v1, v2, v3, and v4 traces remain readable. Missing `transport` defaults t
 | `parse_error` | string, optional | Parse error detail when the observed payload is malformed. |
 
 The three `http_mcp_*` fields are HTTP request routing metadata only. They are emitted only when the corresponding allowlisted routing value is available and are otherwise omitted.
+
+## Configurable trace redaction
+
+Both `proxy` and `http-proxy` accept repeatable, subtractive redaction options:
+
+```bash
+mcp-meter proxy \
+  --redact-metadata tools \
+  --redact-payload-field api_key \
+  --capture-payloads \
+  -- your-server
+
+mcp-meter http-proxy \
+  --redact-metadata http-name \
+  --redact-payload-field access_token \
+  --capture-payloads \
+  --upstream http://127.0.0.1:9000
+```
+
+`--redact-metadata <FIELD>` supports `methods`, `tools`, `http-protocol-version`, `http-method`, `http-name`, `parse-error`, and `all`. Matching metadata is omitted from the persisted event. The option may be repeated.
+
+`--redact-payload-field <JSON_KEY>` matches JSON object keys case-insensitively and recursively. Matching values in `raw_payload` are replaced with `"[REDACTED]"`. This option may also be repeated. It does not enable raw capture: `--capture-payloads` remains required. If a raw payload is not valid JSON while one or more payload-field rules are active, MCPMeter omits `raw_payload` for that event rather than persisting content it could not safely redact.
+
+Redaction is applied after measurement/classification but immediately before every stdio or HTTP/SSE trace write. Byte counts, token counts, schema metrics, and `payload_sha256` therefore continue to describe the original observed MCP payload; only persisted metadata/raw capture is reduced. These rules do not change schema version 5.
+
+Safe defaults are unchanged when no rules are configured. Raw payload persistence remains off by default, and configuration cannot opt in values that MCPMeter does not capture by default. In particular, `Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization`, `Mcp-Param-*`, and arbitrary HTTP headers remain outside trace routing metadata. Configuration errors identify the option and supported rule shape without echoing the supplied value.
 
 ## Exact versus derived metrics
 
@@ -94,7 +120,7 @@ The HTTP trace extension must name its byte and timing boundaries explicitly. In
 - HTTP body/SSE payload bytes are application-boundary bytes, not automatically network wire bytes;
 - response headers, first body byte, complete JSON body, SSE message events, and stream close are distinct timing boundaries;
 - `http_mcp_protocol_version`, `http_mcp_method`, and `http_mcp_name` are HTTP request routing metadata only and are omitted when unavailable;
-- `Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization`, `Mcp-Param-*`, and arbitrary headers are not persisted as default routing metadata;
+- `Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization`, `Mcp-Param-*`, and arbitrary headers are not persisted as routing metadata, and redaction configuration cannot make them eligible for capture;
 - long-lived streams are observed incrementally and are never buffered solely to produce a trace.
 
 See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md).

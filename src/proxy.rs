@@ -1,4 +1,4 @@
-use crate::event::{Direction, MeasurementEvent};
+use crate::event::{Direction, MeasurementEvent, RedactionRules};
 use crate::observer::{observe_payload_at, unix_now_ns, PendingMap};
 use crate::tokenizer::TokenizerProfile;
 use anyhow::{bail, Context, Result};
@@ -15,6 +15,7 @@ pub struct ProxyConfig {
     pub trace_path: PathBuf,
     pub tokenizer: TokenizerProfile,
     pub capture_payloads: bool,
+    pub redaction_rules: RedactionRules,
 }
 
 struct ObservedFrame {
@@ -59,6 +60,7 @@ pub fn run(config: ProxyConfig) -> Result<i32> {
     let observer_run_id = run_id.clone();
     let observer_tokenizer = config.tokenizer.clone();
     let capture_payloads = config.capture_payloads;
+    let redaction_rules = config.redaction_rules.clone();
 
     let observer_thread = thread::spawn(move || {
         observer_loop(
@@ -67,6 +69,7 @@ pub fn run(config: ProxyConfig) -> Result<i32> {
             observer_run_id,
             observer_tokenizer,
             capture_payloads,
+            redaction_rules,
         )
     });
 
@@ -170,6 +173,7 @@ fn observer_loop(
     run_id: String,
     tokenizer: TokenizerProfile,
     capture_payloads: bool,
+    redaction_rules: RedactionRules,
 ) -> Result<()> {
     let mut writer = BufWriter::new(trace_file);
     let mut pending = PendingMap::new();
@@ -187,7 +191,7 @@ fn observer_loop(
                     frame.observed_at,
                     frame.ts_unix_ns,
                 );
-                if let Err(error) = write_event(&mut writer, &event) {
+                if let Err(error) = write_event(&mut writer, event, &redaction_rules) {
                     eprintln!("MCPMeter warning: failed to write trace event: {error:#}");
                 }
             }
@@ -203,8 +207,13 @@ fn observer_loop(
     Ok(())
 }
 
-fn write_event(writer: &mut BufWriter<File>, event: &MeasurementEvent) -> Result<()> {
-    serde_json::to_writer(&mut *writer, event)?;
+fn write_event(
+    writer: &mut BufWriter<File>,
+    mut event: MeasurementEvent,
+    redaction_rules: &RedactionRules,
+) -> Result<()> {
+    redaction_rules.apply(&mut event);
+    serde_json::to_writer(&mut *writer, &event)?;
     writer.write_all(b"\n")?;
     writer.flush()?;
     Ok(())
