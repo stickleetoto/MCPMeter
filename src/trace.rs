@@ -1,8 +1,129 @@
 use crate::event::MeasurementEvent;
-use anyhow::{Context, Result};
-use std::fs::File;
+use anyhow::{bail, Context, Result};
+use std::ffi::OsString;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+pub fn resolve_trace_path(path: &Path, max_bytes: Option<u64>) -> Result<PathBuf> {
+    let Some(max_bytes) = max_bytes else {
+        return Ok(path.to_path_buf());
+    };
+    if max_bytes == 0 {
+        bail!("--trace-max-bytes must be greater than zero");
+    }
+
+    let segments = existing_trace_segments(path)?;
+    let Some((latest_index, latest_path)) = segments.last() else {
+        return Ok(path.to_path_buf());
+    };
+
+    let size = fs::metadata(latest_path)
+        .with_context(|| format!("failed to inspect trace segment {}", latest_path.display()))?
+        .len();
+
+    if size < max_bytes {
+        return Ok(latest_path.clone());
+    }
+
+    trace_segment_path(path, latest_index.saturating_add(1))
+}
+
+fn existing_trace_segments(path: &Path) -> Result<Vec<(u64, PathBuf)>> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut segments = Vec::new();
+
+    if path.is_file() {
+        segments.push((0, path.to_path_buf()));
+    }
+
+    let entries = match fs::read_dir(parent) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(segments),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to inspect trace directory {}", parent.display()));
+        }
+    };
+
+    for entry in entries {
+        let entry = entry
+            .with_context(|| format!("failed to inspect trace directory {}", parent.display()))?;
+        let candidate = entry.path();
+        if candidate == path || !candidate.is_file() {
+            continue;
+        }
+        if let Some(index) = trace_segment_index(path, &candidate) {
+            segments.push((index, candidate));
+        }
+    }
+
+    segments.sort_by_key(|(index, _)| *index);
+    Ok(segments)
+}
+
+fn trace_segment_index(base: &Path, candidate: &Path) -> Option<u64> {
+    let candidate_name = candidate.file_name()?;
+    let extension = base.extension();
+
+    let prefix = match extension {
+        Some(_) => {
+            let mut prefix = base.file_stem()?.to_os_string();
+            prefix.push(".");
+            prefix
+        }
+        None => {
+            let mut prefix = base.file_name()?.to_os_string();
+            prefix.push(".");
+            prefix
+        }
+    };
+
+    let suffix = extension.map(|extension| {
+        let mut suffix = OsString::from(".");
+        suffix.push(extension);
+        suffix
+    });
+
+    let candidate = candidate_name.to_string_lossy();
+    let prefix = prefix.to_string_lossy();
+    let middle = candidate.strip_prefix(prefix.as_ref())?;
+    let middle = match suffix {
+        Some(suffix) => middle.strip_suffix(suffix.to_string_lossy().as_ref())?,
+        None => middle,
+    };
+
+    let index = middle.parse::<u64>().ok()?;
+    (index > 0).then_some(index)
+}
+
+fn trace_segment_path(base: &Path, index: u64) -> Result<PathBuf> {
+    if index == 0 {
+        return Ok(base.to_path_buf());
+    }
+
+    let file_name = match base.extension() {
+        Some(extension) => {
+            let mut file_name = base
+                .file_stem()
+                .context("trace path must include a file name")?
+                .to_os_string();
+            file_name.push(format!(".{index}."));
+            file_name.push(extension);
+            file_name
+        }
+        None => {
+            let mut file_name = base
+                .file_name()
+                .context("trace path must include a file name")?
+                .to_os_string();
+            file_name.push(format!(".{index}"));
+            file_name
+        }
+    };
+
+    Ok(base.with_file_name(file_name))
+}
 
 pub fn read_events(path: &Path) -> Result<Vec<MeasurementEvent>> {
     let file = File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
@@ -81,6 +202,91 @@ mod tests {
             ok: true,
             parse_error: None,
         }
+    }
+
+    #[test]
+    fn rotates_when_latest_segment_reaches_exact_size_boundary() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mcpmeter-trace-boundary-{}-{unique}.jsonl",
+            std::process::id()
+        ));
+        fs::write(&path, b"12345").unwrap();
+
+        let selected = resolve_trace_path(&path, Some(5)).unwrap();
+        assert_eq!(
+            selected.file_name().unwrap().to_string_lossy(),
+            format!(
+                "{}.1.jsonl",
+                path.file_stem().unwrap().to_string_lossy()
+            )
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn selects_latest_rotated_segment_when_it_is_below_limit() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mcpmeter-trace-latest-{}-{unique}.jsonl",
+            std::process::id()
+        ));
+        let rotated = trace_segment_path(&path, 1).unwrap();
+        fs::write(&path, b"12345").unwrap();
+        fs::write(&rotated, b"12").unwrap();
+
+        assert_eq!(resolve_trace_path(&path, Some(5)).unwrap(), rotated);
+
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(rotated);
+    }
+
+    #[test]
+    fn reopen_appends_to_existing_rotated_segment_without_truncation() {
+        use std::io::Write;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mcpmeter-trace-reopen-{}-{unique}.jsonl",
+            std::process::id()
+        ));
+        let rotated = trace_segment_path(&path, 1).unwrap();
+        fs::write(&path, b"12345").unwrap();
+        fs::write(&rotated, b"{\"a\":1}\n").unwrap();
+
+        let selected = resolve_trace_path(&path, Some(64)).unwrap();
+        assert_eq!(selected, rotated);
+
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(&selected)
+            .unwrap();
+        file.write_all(b"{\"b\":2}\n").unwrap();
+        drop(file);
+
+        assert_eq!(
+            fs::read_to_string(&selected).unwrap(),
+            "{\"a\":1}\n{\"b\":2}\n"
+        );
+
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(rotated);
+    }
+
+    #[test]
+    fn zero_rotation_limit_is_rejected() {
+        let error = resolve_trace_path(Path::new("trace.jsonl"), Some(0)).unwrap_err();
+        assert!(error.to_string().contains("greater than zero"));
     }
 
     #[test]
