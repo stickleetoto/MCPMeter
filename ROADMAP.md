@@ -15,9 +15,9 @@ The underlying product roadmap remains in `docs/ROADMAP.md`.
 
 ## B003-A — Finish v0.2 reporting/storage work
 
-- [ ] MCPM-201 Add schema-cost comparison across MCP servers/runs while preserving tokenizer/profile compatibility rules. <!-- devseat: id=MCPM-201 writes=src/compare.rs,src/report.rs,tests/cli_workflow.rs,docs/ROADMAP.md -->
-- [ ] MCPM-202 Add configurable redaction rules for trace metadata/payload capture without weakening safe defaults. <!-- devseat: id=MCPM-202 writes=src/main.rs,src/event.rs,src/proxy.rs,src/http_proxy.rs,tests/error_paths.rs,docs/TRACE_FORMAT.md,docs/ROADMAP.md -->
-- [ ] MCPM-203 Add optional trace rotation / size limits with append-safe behavior and focused regression coverage. <!-- devseat: id=MCPM-203 writes=src/trace.rs,src/main.rs,tests/cli_workflow.rs,docs/TRACE_FORMAT.md,docs/ROADMAP.md -->
+- [x] MCPM-201 Add schema-cost comparison across MCP servers/runs while preserving tokenizer/profile compatibility rules. <!-- devseat: id=MCPM-201 writes=src/compare.rs,src/report.rs,tests/cli_workflow.rs,docs/ROADMAP.md -->
+- [x] MCPM-202 Add configurable redaction rules for trace metadata/payload capture without weakening safe defaults. <!-- devseat: id=MCPM-202 writes=src/main.rs,src/event.rs,src/proxy.rs,src/http_proxy.rs,tests/error_paths.rs,docs/TRACE_FORMAT.md,docs/ROADMAP.md -->
+- [x] MCPM-203 Add optional trace rotation / size limits with append-safe behavior and focused regression coverage. <!-- devseat: id=MCPM-203 writes=src/trace.rs,src/main.rs,tests/cli_workflow.rs,docs/TRACE_FORMAT.md -->
 
 ## B003-B — Begin v0.3 agent benchmarking
 
