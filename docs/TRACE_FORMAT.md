@@ -90,6 +90,28 @@ The adapter consumes a provider payload supplied by its caller; it does not make
 
 This interface is intentionally separate from the current `MeasurementEvent` trace record. Persisting or reporting provider usage alongside benchmark runs is future integration work and must preserve the same source labeling rather than relabeling MCP observations as provider usage.
 
+## Model-context estimate adapter contract
+
+MCPM-302 introduces model-context estimate adapter interface version **1** without changing the schema-v5 MCP measurement event. Current proxy trace events continue to report observed MCP measurements only.
+
+A context-estimate adapter receives context input supplied by its caller and may return a normalized `ModelContextEstimate` envelope:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `interface_version` | integer | MCPMeter context-estimate adapter interface version. MCPM-302 defines version `1`. |
+| `origin` | string | Always `estimated`. |
+| `adapter` | string | Stable estimator/adapter identifier. |
+| `adapter_version` | integer | Positive adapter-specific estimation-contract version. |
+| `basis` | string | Stable identifier for the context/input basis being estimated, such as a host-assembled context representation. |
+| `model` | string, optional | Model identity when relevant to the estimation method. |
+| `estimated_context_tokens` | integer | Estimated model-context token count produced by the adapter. |
+
+The adapter wrapper does not manufacture estimates from `serialized_tokens`, `schema_tokens`, payload bytes, or provider-reported `input_tokens`, `output_tokens`, or `total_tokens`. If an adapter cannot produce an estimate from its supported input, the result remains absent.
+
+The `estimated` origin and `estimated_context_tokens` field name are part of the contract: model-context estimates must remain visibly distinct from observed MCP serialized-token measurements and from `provider_reported` usage. A context estimate is not a provider billing claim and must not be described as billable or provider-reported usage.
+
+Like the provider-usage adapter contract, this interface is separate from the current `MeasurementEvent` trace record. Persisting or reporting estimates alongside benchmark runs is future integration work and must retain the explicit estimate source/basis labels.
+
 ## Exact versus derived metrics
 
 MCPMeter intentionally keeps unlike quantities separate.
@@ -116,6 +138,7 @@ MCPMeter intentionally keeps unlike quantities separate.
 
 - the final prompt or context assembled by an MCP host
 - provider billing/usage tokens unless independently supplied through a provider-usage adapter
+- model-visible context size unless independently estimated through a context-estimate adapter
 - hidden model/system tokens
 - host-side caching, truncation, deduplication, or schema transformation
 - HTTP/TLS/network framing bytes

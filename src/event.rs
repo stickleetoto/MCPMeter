@@ -6,6 +6,10 @@ use std::collections::BTreeSet;
 #[path = "provider_usage.rs"]
 pub mod provider_usage;
 
+#[allow(dead_code)]
+#[path = "context_estimate.rs"]
+pub mod context_estimate;
+
 const REDACTED_VALUE: &str = "[REDACTED]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

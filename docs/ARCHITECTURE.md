@@ -55,6 +55,14 @@ Provider usage adapters do not inspect MCP transport measurements as a fallback 
 
 The normalized record is explicitly labeled `provider_reported`. Adapter errors describe the failing field or contract condition without embedding the raw provider payload or field value.
 
+### `context_estimate`
+
+Defines the versioned adapter boundary for estimated model-context token counts. Adapter interface v1 accepts caller-supplied context input and returns a normalized `estimated_context_tokens` value together with adapter identity/version, an explicit estimate `basis`, and optional model identity.
+
+The normalized record is always labeled `origin: estimated`. Context-estimate adapters remain separate from both provider-reported usage and observed MCP serialized-token measurements. The adapter wrapper does not reinterpret `serialized_tokens`, provider `input_tokens`/`output_tokens`/`total_tokens`, schema tokens, or payload bytes as model context.
+
+A context estimate is not provider billing evidence. Adapter errors describe the failing field or contract condition without embedding caller-supplied context values.
+
 ### `redaction`
 
 Controls what, if anything, may be persisted from message content. Raw payload persistence is disabled by default.
@@ -79,6 +87,8 @@ MCPMeter must never collapse unlike quantities into one number.
 4. **provider usage** — actual usage reported by a model provider, if independently available.
 
 Provider-reported usage enters through the versioned `provider_usage` adapter contract and remains separate from the MCP observation path. The v1 adapter contract carries its own interface version plus adapter identity/version so changes in provider payload mapping can be identified independently of the MCP trace schema.
+
+Model-context estimates enter through the versioned `context_estimate` adapter contract. Every normalized result is explicitly labeled `estimated` and names its estimation basis. This estimate source is neither provider-reported usage nor an observed MCP serialized-token measurement, and it must not be presented as billable/provider usage.
 
 For stdio, the current `wire_bytes` field is exact for the observed stdio frame, including its newline delimiter when present.
 
