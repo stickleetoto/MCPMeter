@@ -1,4 +1,4 @@
-use crate::event::{Direction, MeasurementEvent};
+use crate::event::{Direction, MeasurementEvent, RedactionRules};
 use crate::observer::{observe_http_payload_at, unix_now_ns, PendingMap};
 use crate::sse::SseParser;
 use crate::tokenizer::TokenizerProfile;
@@ -18,6 +18,7 @@ pub struct HttpProxyConfig {
     pub trace_path: PathBuf,
     pub tokenizer: TokenizerProfile,
     pub capture_payloads: bool,
+    pub redaction_rules: RedactionRules,
 }
 
 #[derive(Debug, Default)]
@@ -71,6 +72,7 @@ struct SseObservingReader<'a, R: Read> {
     run_id: &'a str,
     tokenizer: &'a TokenizerProfile,
     capture_payloads: bool,
+    redaction_rules: &'a RedactionRules,
     pending: &'a mut PendingMap,
     writer: &'a mut BufWriter<File>,
     finished: bool,
@@ -82,6 +84,7 @@ impl<'a, R: Read> SseObservingReader<'a, R> {
         run_id: &'a str,
         tokenizer: &'a TokenizerProfile,
         capture_payloads: bool,
+        redaction_rules: &'a RedactionRules,
         pending: &'a mut PendingMap,
         writer: &'a mut BufWriter<File>,
     ) -> Self {
@@ -91,6 +94,7 @@ impl<'a, R: Read> SseObservingReader<'a, R> {
             run_id,
             tokenizer,
             capture_payloads,
+            redaction_rules,
             pending,
             writer,
             finished: false,
@@ -113,7 +117,7 @@ impl<'a, R: Read> SseObservingReader<'a, R> {
                 Instant::now(),
                 unix_now_ns(),
             );
-            write_event(self.writer, &event);
+            write_event(self.writer, event, self.redaction_rules);
         }
     }
 }
@@ -245,7 +249,7 @@ fn handle_request(
             unix_now_ns(),
         );
         apply_request_routing_metadata(&mut event, routing_metadata);
-        write_event(writer, &event);
+        write_event(writer, event, &config.redaction_rules);
     }
 
     let mut upstream_request = agent.request(&method, &upstream_url);
@@ -294,6 +298,7 @@ fn handle_request(
             run_id,
             &config.tokenizer,
             config.capture_payloads,
+            &config.redaction_rules,
             pending,
             writer,
         );
@@ -332,7 +337,7 @@ fn handle_request(
             Instant::now(),
             unix_now_ns(),
         );
-        write_event(writer, &event);
+        write_event(writer, event, &config.redaction_rules);
     }
 
     let mut downstream_response =
@@ -401,9 +406,14 @@ fn validate_upstream(upstream: &str) -> Result<()> {
     bail!("upstream must start with http:// or https://");
 }
 
-fn write_event(writer: &mut BufWriter<File>, event: &MeasurementEvent) {
+fn write_event(
+    writer: &mut BufWriter<File>,
+    mut event: MeasurementEvent,
+    redaction_rules: &RedactionRules,
+) {
+    redaction_rules.apply(&mut event);
     if let Err(error) = (|| -> Result<()> {
-        serde_json::to_writer(&mut *writer, event)?;
+        serde_json::to_writer(&mut *writer, &event)?;
         writer.write_all(b"\n")?;
         writer.flush()?;
         Ok(())
@@ -448,6 +458,65 @@ mod tests {
         ));
         assert!(!is_json_rpc_payload(br#"{"event":"not-json-rpc"}"#));
         assert!(!is_json_rpc_payload(b"plain text"));
+    }
+
+    #[test]
+    fn configured_redaction_is_applied_before_http_trace_write() {
+        let tokenizer = TokenizerProfile::Bytes4Estimate;
+        let mut pending = PendingMap::new();
+        let mut event = observe_http_payload_at(
+            br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"api_key":"http-secret-marker"}}}"#,
+            Direction::ClientToServer,
+            "run",
+            &tokenizer,
+            true,
+            &mut pending,
+            Instant::now(),
+            1,
+        );
+        apply_request_routing_metadata(
+            &mut event,
+            HttpRequestRoutingMetadata {
+                protocol_version: Some("2026-07-28".to_string()),
+                mcp_method: Some("tools/call".to_string()),
+                mcp_name: Some("echo".to_string()),
+            },
+        );
+
+        let rules = RedactionRules::parse(
+            &["http-name".to_string()],
+            &["api_key".to_string()],
+        )
+        .unwrap();
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mcpmeter-http-redaction-{}-{unique}.jsonl",
+            std::process::id()
+        ));
+        let file = File::create(&path).unwrap();
+        let mut writer = BufWriter::new(file);
+        write_event(&mut writer, event, &rules);
+        drop(writer);
+
+        let trace = std::fs::read_to_string(&path).unwrap();
+        assert!(!trace.contains("http-secret-marker"));
+        let persisted: Value = serde_json::from_str(trace.trim()).unwrap();
+        assert_eq!(persisted["http_mcp_protocol_version"], "2026-07-28");
+        assert_eq!(persisted["http_mcp_method"], "tools/call");
+        assert!(persisted.get("http_mcp_name").is_none());
+
+        let raw_payload = persisted["raw_payload"].as_str().unwrap();
+        let raw: Value = serde_json::from_str(raw_payload).unwrap();
+        assert_eq!(
+            raw["params"]["arguments"]["api_key"],
+            Value::String("[REDACTED]".to_string())
+        );
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

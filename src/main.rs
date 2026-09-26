@@ -46,6 +46,14 @@ enum Commands {
         #[arg(long)]
         capture_payloads: bool,
 
+        /// Remove selected metadata fields before trace persistence. Repeat as needed.
+        #[arg(long = "redact-metadata", value_name = "FIELD")]
+        redact_metadata: Vec<String>,
+
+        /// Redact matching JSON keys from captured raw payloads. Repeat as needed.
+        #[arg(long = "redact-payload-field", value_name = "JSON_KEY")]
+        redact_payload_field: Vec<String>,
+
         /// MCP server command and arguments. Prefer placing `--` before it.
         #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
         command: Vec<String>,
@@ -72,6 +80,14 @@ enum Commands {
         /// Persist raw MCP HTTP bodies. Dangerous: payloads may contain secrets.
         #[arg(long)]
         capture_payloads: bool,
+
+        /// Remove selected metadata fields before trace persistence. Repeat as needed.
+        #[arg(long = "redact-metadata", value_name = "FIELD")]
+        redact_metadata: Vec<String>,
+
+        /// Redact matching JSON keys from captured raw payloads. Repeat as needed.
+        #[arg(long = "redact-payload-field", value_name = "JSON_KEY")]
+        redact_payload_field: Vec<String>,
     },
 
     /// Summarize a JSONL trace. Defaults to the most recent run in the file.
@@ -185,14 +201,20 @@ fn main() -> Result<()> {
             trace,
             tokenizer,
             capture_payloads,
+            redact_metadata,
+            redact_payload_field,
             command,
         } => {
             let tokenizer = TokenizerProfile::parse(&tokenizer)?;
+            let redaction_rules =
+                event::RedactionRules::parse(&redact_metadata, &redact_payload_field)
+                    .map_err(anyhow::Error::msg)?;
             let code = proxy::run(proxy::ProxyConfig {
                 command,
                 trace_path: trace,
                 tokenizer,
                 capture_payloads,
+                redaction_rules,
             })?;
             if code != 0 {
                 std::process::exit(code);
@@ -204,14 +226,20 @@ fn main() -> Result<()> {
             trace,
             tokenizer,
             capture_payloads,
+            redact_metadata,
+            redact_payload_field,
         } => {
             let tokenizer = TokenizerProfile::parse(&tokenizer)?;
+            let redaction_rules =
+                event::RedactionRules::parse(&redact_metadata, &redact_payload_field)
+                    .map_err(anyhow::Error::msg)?;
             http_proxy::run(http_proxy::HttpProxyConfig {
                 listen,
                 upstream,
                 trace_path: trace,
                 tokenizer,
                 capture_payloads,
+                redaction_rules,
             })?;
         }
         Commands::Report {
