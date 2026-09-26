@@ -108,12 +108,7 @@ fn summarize_selected(run_id: String, selected: &[&MeasurementEvent]) -> Result<
                 if event.kind == "batch" {
                     batch_request_events += 1;
                     batch_tool_calls += event.tool_call_count;
-                    record_tool_calls(
-                        &mut accumulators,
-                        &event.tools,
-                        event.tool_call_count,
-                        true,
-                    );
+                    record_tool_calls(&mut accumulators, &event.tools, event.tool_call_count, true);
 
                     if let Some(tool) = attributable_batch_request_tool(event) {
                         let accumulator = accumulators.entry(tool.to_string()).or_default();

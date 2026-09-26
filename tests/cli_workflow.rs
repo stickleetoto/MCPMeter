@@ -138,10 +138,12 @@ fn tools_keeps_mixed_batch_cost_unattributed() {
         assert_eq!(tool["non_batch_calls"], 0);
         assert_eq!(tool["request_tokens"], 0);
     }
-    assert!(tool_cost["unattributed_batch_request_tokens"]
-        .as_u64()
-        .unwrap()
-        > 0);
+    assert!(
+        tool_cost["unattributed_batch_request_tokens"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
 
     let _ = fs::remove_file(trace);
 }

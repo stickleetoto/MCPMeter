@@ -54,7 +54,10 @@ pub fn adapt_provider_usage(
     adapter: &dyn ProviderUsageAdapter,
     provider_payload: &Value,
 ) -> Result<Option<ProviderReportedUsage>, ProviderUsageAdapterError> {
-    validate_identity(adapter.adapter_id(), ProviderUsageAdapterError::InvalidAdapterIdentity)?;
+    validate_identity(
+        adapter.adapter_id(),
+        ProviderUsageAdapterError::InvalidAdapterIdentity,
+    )?;
     validate_identity(
         adapter.provider_id(),
         ProviderUsageAdapterError::InvalidProviderIdentity,
