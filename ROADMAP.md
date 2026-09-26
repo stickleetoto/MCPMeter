@@ -23,12 +23,12 @@ The underlying product roadmap remains in `docs/ROADMAP.md`.
 
 Start only after B003-A is batch-verified.
 
-- [ ] MCPM-301 Define a versioned provider-usage adapter interface that keeps provider-reported usage distinct from observed MCP serialized tokens. <!-- devseat: id=MCPM-301 writes=src/provider_usage.rs,src/event.rs,docs/ARCHITECTURE.md,docs/TRACE_FORMAT.md -->
-- [ ] MCPM-302 Add a model-context estimate adapter interface with explicit estimated labeling and no provider-billing claims. <!-- devseat: id=MCPM-302 writes=src/context_estimate.rs,src/event.rs,docs/ARCHITECTURE.md,docs/TRACE_FORMAT.md -->
+- [x] MCPM-301 Define a versioned provider-usage adapter interface that keeps provider-reported usage distinct from observed MCP serialized tokens. <!-- devseat: id=MCPM-301 writes=src/provider_usage.rs,src/event.rs,docs/ARCHITECTURE.md,docs/TRACE_FORMAT.md -->
+- [x] MCPM-302 Add a model-context estimate adapter interface with explicit estimated labeling and no provider-billing claims. <!-- devseat: id=MCPM-302 writes=src/context_estimate.rs,src/event.rs,docs/ARCHITECTURE.md,docs/TRACE_FORMAT.md -->
 - [ ] MCPM-303 Add a deterministic local A/B task-runner skeleton that records baseline/candidate run identities without becoming an orchestration framework. <!-- devseat: id=MCPM-303 writes=src/ab_runner.rs,src/main.rs,tests/cli_workflow.rs,docs/ARCHITECTURE.md -->
 - [ ] MCPM-304 Add task success/test-result hooks as optional benchmark evidence, separate from transport measurements. <!-- devseat: id=MCPM-304 depends=MCPM-303 writes=src/ab_runner.rs,src/event.rs,tests/cli_workflow.rs -->
 - [ ] MCPM-305 Add explicit MCP efficiency metrics derived from existing cost/latency/success evidence, with machine-readable output. <!-- devseat: id=MCPM-305 depends=MCPM-301,MCPM-302,MCPM-304 writes=src/report.rs,src/compare.rs,tests/cli_workflow.rs -->
-- [ ] MCPM-306 Add batch/tool-selection analysis over recorded runs without inventing attribution for shared batch payload cost. <!-- devseat: id=MCPM-306 writes=src/tool_cost.rs,src/report.rs,tests/cli_workflow.rs -->
+- [x] MCPM-306 Add batch/tool-selection analysis over recorded runs without inventing attribution for shared batch payload cost. <!-- devseat: id=MCPM-306 writes=src/tool_cost.rs,src/report.rs,tests/cli_workflow.rs -->
 
 ## Verification boundary
 
