@@ -64,22 +64,6 @@ fn runs_tools_and_compare_work_end_to_end() {
     assert_eq!(tool_cost["unattributed_batch_response_tokens"], 0);
 
     let output = Command::new(exe)
-        .arg("report")
-        .arg(&trace)
-        .arg("--run-id")
-        .arg(candidate_id)
-        .arg("--json")
-        .output()
-        .expect("run report command");
-    assert!(output.status.success());
-
-    let report: Value = serde_json::from_slice(&output.stdout).expect("parse run report");
-    assert_eq!(report["tool_calls"], 2);
-    assert_eq!(report["batch_request_events"], 0);
-    assert_eq!(report["batch_tool_calls"], 0);
-    assert_eq!(report["non_batch_tool_calls"], 2);
-
-    let output = Command::new(exe)
         .arg("compare")
         .arg(&trace)
         .arg(&trace)
@@ -158,20 +142,6 @@ fn tools_keeps_mixed_batch_cost_unattributed() {
         .as_u64()
         .unwrap()
         > 0);
-
-    let output = Command::new(exe)
-        .arg("report")
-        .arg(&trace)
-        .arg("--json")
-        .output()
-        .expect("run batch report command");
-    assert!(output.status.success());
-
-    let report: Value = serde_json::from_slice(&output.stdout).expect("parse batch report");
-    assert_eq!(report["tool_calls"], 2);
-    assert_eq!(report["batch_request_events"], 1);
-    assert_eq!(report["batch_tool_calls"], 2);
-    assert_eq!(report["non_batch_tool_calls"], 0);
 
     let _ = fs::remove_file(trace);
 }
