@@ -30,7 +30,10 @@ pub fn resolve_trace_path(path: &Path, max_bytes: Option<u64>) -> Result<PathBuf
 }
 
 fn existing_trace_segments(path: &Path) -> Result<Vec<(u64, PathBuf)>> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let mut segments = Vec::new();
 
     if path.is_file() {
