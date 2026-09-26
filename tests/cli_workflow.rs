@@ -17,8 +17,8 @@ fn runs_tools_and_compare_work_end_to_end() {
         std::process::id()
     ));
 
-    record_session(exe, &trace, 1);
-    record_session(exe, &trace, 2);
+    record_session(exe, &trace, 1, "bytes4-estimate");
+    record_session(exe, &trace, 2, "bytes4-estimate");
 
     let output = Command::new(exe)
         .arg("runs")
@@ -77,17 +77,94 @@ fn runs_tools_and_compare_work_end_to_end() {
     assert_eq!(comparison["tool_calls"]["candidate"], 2);
     assert_eq!(comparison["tool_calls"]["delta"], 1);
     assert!(comparison["serialized_tokens"]["delta"].as_i64().unwrap() > 0);
+    assert_eq!(comparison["schema_tokens"]["delta"], 0);
+    assert_eq!(comparison["tools_exposed"]["delta"], 0);
+    assert_eq!(
+        comparison["schema_tokens_per_tool"]["delta"].as_f64(),
+        Some(0.0)
+    );
 
     let _ = fs::remove_file(trace);
 }
 
-fn record_session(exe: &str, trace: &Path, tool_calls: u64) {
+#[test]
+fn compare_rejects_different_tokenizers() {
+    let exe = env!("CARGO_BIN_EXE_mcp-meter");
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let baseline = std::env::temp_dir().join(format!(
+        "mcpmeter-compare-baseline-{}-{unique}.jsonl",
+        std::process::id()
+    ));
+    let candidate = std::env::temp_dir().join(format!(
+        "mcpmeter-compare-candidate-{}-{unique}.jsonl",
+        std::process::id()
+    ));
+
+    record_session(exe, &baseline, 1, "bytes4-estimate");
+    record_session(exe, &candidate, 1, "cl100k-base");
+
+    let output = Command::new(exe)
+        .arg("compare")
+        .arg(&baseline)
+        .arg(&candidate)
+        .arg("--json")
+        .output()
+        .expect("run incompatible compare command");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("different tokenizers"));
+
+    let _ = fs::remove_file(baseline);
+    let _ = fs::remove_file(candidate);
+}
+
+#[test]
+fn compare_rejects_different_estimation_profiles() {
+    let exe = env!("CARGO_BIN_EXE_mcp-meter");
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let baseline = std::env::temp_dir().join(format!(
+        "mcpmeter-profile-baseline-{}-{unique}.jsonl",
+        std::process::id()
+    ));
+    let candidate = std::env::temp_dir().join(format!(
+        "mcpmeter-profile-candidate-{}-{unique}.jsonl",
+        std::process::id()
+    ));
+
+    record_session(exe, &baseline, 1, "bytes4-estimate");
+    record_session(exe, &candidate, 1, "bytes4-estimate");
+    rewrite_estimation_profile(&candidate, false);
+
+    let output = Command::new(exe)
+        .arg("compare")
+        .arg(&baseline)
+        .arg(&candidate)
+        .arg("--json")
+        .output()
+        .expect("run profile-incompatible compare command");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("different tokenizer profiles"));
+
+    let _ = fs::remove_file(baseline);
+    let _ = fs::remove_file(candidate);
+}
+
+fn record_session(exe: &str, trace: &Path, tool_calls: u64, tokenizer: &str) {
     let mut child = Command::new(exe)
         .arg("proxy")
         .arg("--trace")
         .arg(trace)
         .arg("--tokenizer")
-        .arg("bytes4-estimate")
+        .arg(tokenizer)
         .arg("--")
         .arg(exe)
         .arg("fixture")
@@ -121,6 +198,20 @@ fn record_session(exe: &str, trace: &Path, tool_calls: u64) {
     drop(stdin);
     let status = child.wait().expect("wait for measured fixture");
     assert!(status.success());
+}
+
+fn rewrite_estimation_profile(trace: &Path, estimated: bool) {
+    let input = fs::read_to_string(trace).expect("read trace for profile rewrite");
+    let mut output = String::new();
+
+    for line in input.lines() {
+        let mut event: Value = serde_json::from_str(line).expect("parse trace event");
+        event["token_count_estimated"] = Value::Bool(estimated);
+        output.push_str(&serde_json::to_string(&event).expect("serialize trace event"));
+        output.push('\n');
+    }
+
+    fs::write(trace, output).expect("write rewritten trace");
 }
 
 fn read_response(reader: &mut BufReader<impl std::io::Read>) {

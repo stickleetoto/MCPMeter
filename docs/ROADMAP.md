@@ -50,6 +50,7 @@ Already landed:
 Remaining:
 
 - [ ] schema-cost comparison across MCP servers
+  - MCPM-201 extends `compare` with schema-token deltas and schema tokens per exposed tool when both runs contain compatible `tools/list` measurements. Token-derived comparisons require the same tokenizer and the same exact/estimated tokenizer profile; mixed-profile runs and incompatible pairs fail explicitly instead of being normalized.
 - [ ] configurable redaction rules
 - [ ] optional trace rotation / size limits
 

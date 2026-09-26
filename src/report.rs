@@ -1,6 +1,6 @@
 use crate::event::Direction;
 use crate::trace::{read_events, select_run};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -40,7 +40,17 @@ pub fn build_report(path: &Path, requested_run: Option<&str>) -> Result<RunRepor
     let (run_id, selected) = select_run(&events, requested_run)?;
 
     let tokenizer = selected[0].tokenizer.clone();
-    let token_count_estimated = selected.iter().any(|event| event.token_count_estimated);
+    if selected.iter().any(|event| event.tokenizer != tokenizer) {
+        bail!("run contains mixed tokenizer profiles: {run_id}");
+    }
+
+    let token_count_estimated = selected[0].token_count_estimated;
+    if selected
+        .iter()
+        .any(|event| event.token_count_estimated != token_count_estimated)
+    {
+        bail!("run contains mixed exact/estimated token profiles: {run_id}");
+    }
     let mut unique_tools = BTreeSet::new();
     let mut latencies_us = Vec::new();
     let mut wire_c2s = Some(0_u64);
