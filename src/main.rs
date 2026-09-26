@@ -38,6 +38,10 @@ enum Commands {
         #[arg(long, default_value = "mcpmeter.jsonl")]
         trace: PathBuf,
 
+        /// Rotate to numbered trace segments when the latest segment is at least this many bytes.
+        #[arg(long, value_name = "BYTES")]
+        trace_max_bytes: Option<u64>,
+
         /// Tokenizer profile: o200k-base, cl100k-base, or bytes4-estimate.
         #[arg(long, default_value = "o200k-base")]
         tokenizer: String,
@@ -72,6 +76,10 @@ enum Commands {
         /// Append JSONL measurement events to this file.
         #[arg(long, default_value = "mcpmeter.jsonl")]
         trace: PathBuf,
+
+        /// Rotate to numbered trace segments when the latest segment is at least this many bytes.
+        #[arg(long, value_name = "BYTES")]
+        trace_max_bytes: Option<u64>,
 
         /// Tokenizer profile: o200k-base, cl100k-base, or bytes4-estimate.
         #[arg(long, default_value = "o200k-base")]
@@ -199,12 +207,14 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Proxy {
             trace,
+            trace_max_bytes,
             tokenizer,
             capture_payloads,
             redact_metadata,
             redact_payload_field,
             command,
         } => {
+            let trace = trace::resolve_trace_path(&trace, trace_max_bytes)?;
             let tokenizer = TokenizerProfile::parse(&tokenizer)?;
             let redaction_rules =
                 event::RedactionRules::parse(&redact_metadata, &redact_payload_field)
@@ -224,11 +234,13 @@ fn main() -> Result<()> {
             listen,
             upstream,
             trace,
+            trace_max_bytes,
             tokenizer,
             capture_payloads,
             redact_metadata,
             redact_payload_field,
         } => {
+            let trace = trace::resolve_trace_path(&trace, trace_max_bytes)?;
             let tokenizer = TokenizerProfile::parse(&tokenizer)?;
             let redaction_rules =
                 event::RedactionRules::parse(&redact_metadata, &redact_payload_field)

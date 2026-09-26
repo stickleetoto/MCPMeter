@@ -158,11 +158,64 @@ fn compare_rejects_different_estimation_profiles() {
     let _ = fs::remove_file(candidate);
 }
 
+#[test]
+fn trace_rotation_selects_and_reopens_numbered_segment() {
+    let exe = env!("CARGO_BIN_EXE_mcp-meter");
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let trace = std::env::temp_dir().join(format!(
+        "mcpmeter-rotation-{}-{unique}.jsonl",
+        std::process::id()
+    ));
+
+    record_session(exe, &trace, 3, "bytes4-estimate");
+    let limit = fs::metadata(&trace).unwrap().len();
+
+    record_session_with_limit(exe, &trace, 0, "bytes4-estimate", Some(limit));
+    let rotated = rotated_trace_path(&trace, 1);
+    assert!(rotated.exists());
+    let first_rotated_size = fs::metadata(&rotated).unwrap().len();
+    assert!(first_rotated_size < limit);
+
+    record_session_with_limit(exe, &trace, 0, "bytes4-estimate", Some(limit));
+    let reopened_size = fs::metadata(&rotated).unwrap().len();
+    assert!(reopened_size > first_rotated_size);
+    assert!(!rotated_trace_path(&trace, 2).exists());
+
+    for path in [&trace, &rotated] {
+        let text = fs::read_to_string(path).unwrap();
+        assert!(!text.is_empty());
+        for line in text.lines() {
+            let _: Value = serde_json::from_str(line).expect("valid rotated JSONL event");
+        }
+    }
+
+    let _ = fs::remove_file(trace);
+    let _ = fs::remove_file(rotated);
+}
+
 fn record_session(exe: &str, trace: &Path, tool_calls: u64, tokenizer: &str) {
-    let mut child = Command::new(exe)
-        .arg("proxy")
-        .arg("--trace")
-        .arg(trace)
+    record_session_with_limit(exe, trace, tool_calls, tokenizer, None);
+}
+
+fn record_session_with_limit(
+    exe: &str,
+    trace: &Path,
+    tool_calls: u64,
+    tokenizer: &str,
+    trace_max_bytes: Option<u64>,
+) {
+    let mut command = Command::new(exe);
+    command.arg("proxy").arg("--trace").arg(trace);
+    if let Some(limit) = trace_max_bytes {
+        command
+            .arg("--trace-max-bytes")
+            .arg(limit.to_string());
+    }
+
+    let mut child = command
         .arg("--tokenizer")
         .arg(tokenizer)
         .arg("--")
@@ -198,6 +251,13 @@ fn record_session(exe: &str, trace: &Path, tool_calls: u64, tokenizer: &str) {
     drop(stdin);
     let status = child.wait().expect("wait for measured fixture");
     assert!(status.success());
+}
+
+fn rotated_trace_path(trace: &Path, index: u64) -> std::path::PathBuf {
+    let mut file_name = trace.file_stem().unwrap().to_os_string();
+    file_name.push(format!(".{index}."));
+    file_name.push(trace.extension().unwrap());
+    trace.with_file_name(file_name)
 }
 
 fn rewrite_estimation_profile(trace: &Path, estimated: bool) {

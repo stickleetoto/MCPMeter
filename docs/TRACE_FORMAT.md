@@ -125,6 +125,27 @@ The HTTP trace extension must name its byte and timing boundaries explicitly. In
 
 See [`HTTP_MEASUREMENT.md`](HTTP_MEASUREMENT.md).
 
+## Trace size limits and rotation
+
+Trace rotation is opt-in on both producing commands:
+
+```bash
+mcp-meter proxy --trace mcpmeter.jsonl --trace-max-bytes 10485760 -- your-server
+
+mcp-meter http-proxy \
+  --trace mcpmeter.jsonl \
+  --trace-max-bytes 10485760 \
+  --upstream http://127.0.0.1:9000
+```
+
+Without `--trace-max-bytes`, MCPMeter keeps the existing behavior and appends to exactly the configured `--trace` path.
+
+With a positive byte threshold, MCPMeter selects the active segment when the proxy process starts. The base file is segment 0. If the latest existing segment is smaller than the threshold, MCPMeter reopens that segment in append mode. If its size is equal to or greater than the threshold, MCPMeter selects the next numbered segment, preserving the original extension: `mcpmeter.jsonl`, `mcpmeter.1.jsonl`, `mcpmeter.2.jsonl`, and so on. Existing segments are never renamed, truncated, or deleted.
+
+The threshold is a rollover boundary checked before a process opens its trace, not a hard per-record truncation cap. A segment may therefore finish larger than the configured value; MCPMeter never splits a JSONL record or discards trace data merely to stay under the threshold. On a later restart, the latest numbered segment is rediscovered and either appended to or advanced according to the same boundary, so rotation remains append-safe across process restarts. A value of zero is rejected.
+
+Every segment remains an ordinary schema-v5 JSONL trace; rotation does not introduce a new trace format.
+
 ## Run boundaries
 
 A new `run_id` is generated each time a proxy run starts. Multiple runs may be appended to one JSONL file.
