@@ -94,8 +94,12 @@ impl fmt::Display for ContextEstimateAdapterError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedInput => formatter.write_str("unsupported context estimate input"),
-            Self::MissingField(field) => write!(formatter, "missing context estimate field: {field}"),
-            Self::InvalidField(field) => write!(formatter, "invalid context estimate field: {field}"),
+            Self::MissingField(field) => {
+                write!(formatter, "missing context estimate field: {field}")
+            }
+            Self::InvalidField(field) => {
+                write!(formatter, "invalid context estimate field: {field}")
+            }
             Self::InvalidAdapterIdentity => {
                 formatter.write_str("context estimate adapter id must be non-empty")
             }
@@ -167,10 +171,9 @@ mod tests {
 
     #[test]
     fn estimate_is_explicitly_labeled_and_versioned() {
-        let estimate =
-            adapt_context_estimate(&FixedEstimateAdapter, &json!({"messages": []}))
-                .unwrap()
-                .unwrap();
+        let estimate = adapt_context_estimate(&FixedEstimateAdapter, &json!({"messages": []}))
+            .unwrap()
+            .unwrap();
 
         assert_eq!(
             estimate.interface_version,
@@ -232,11 +235,9 @@ mod tests {
         }
 
         let secret_marker = "context-secret-marker";
-        let error = adapt_context_estimate(
-            &InvalidBasisAdapter,
-            &json!({"content": secret_marker}),
-        )
-        .unwrap_err();
+        let error =
+            adapt_context_estimate(&InvalidBasisAdapter, &json!({"content": secret_marker}))
+                .unwrap_err();
 
         assert!(error.to_string().contains("basis"));
         assert!(!error.to_string().contains(secret_marker));
