@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
+#[allow(dead_code)]
+#[path = "provider_usage.rs"]
+pub mod provider_usage;
+
 const REDACTED_VALUE: &str = "[REDACTED]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
