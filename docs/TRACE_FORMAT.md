@@ -66,6 +66,30 @@ Redaction is applied after measurement/classification but immediately before eve
 
 Safe defaults are unchanged when no rules are configured. Raw payload persistence remains off by default, and configuration cannot opt in values that MCPMeter does not capture by default. In particular, `Authorization`, `Cookie`, `Set-Cookie`, `Proxy-Authorization`, `Mcp-Param-*`, and arbitrary HTTP headers remain outside trace routing metadata. Configuration errors identify the option and supported rule shape without echoing the supplied value.
 
+## Provider-reported usage adapter contract
+
+MCPM-301 introduces provider-usage adapter interface version **1** without changing the schema-v5 MCP measurement event. Current proxy trace events continue to describe the observed MCP transport/payload boundary and do not synthesize provider usage.
+
+An adapter may normalize usage only when a provider response independently reports it. The normalized `ProviderReportedUsage` envelope contains:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `interface_version` | integer | MCPMeter provider-usage adapter interface version. MCPM-301 defines version `1`. |
+| `origin` | string | Always `provider_reported`; this distinguishes the record from MCP serialized-token measurements and model-context estimates. |
+| `adapter` | string | Stable adapter identifier. |
+| `adapter_version` | integer | Positive adapter-specific mapping version. |
+| `provider` | string | Stable provider identifier supplied by the adapter. |
+| `model` | string, optional | Provider/model identity when the provider payload reports or otherwise supplies it to the adapter. |
+| `input_tokens` | integer, optional | Provider-reported input token count. |
+| `output_tokens` | integer, optional | Provider-reported output token count. |
+| `total_tokens` | integer, optional | Provider-reported total token count. |
+
+At least one token counter must be reported for an adapter result to be accepted. Missing counters remain absent: MCPMeter does not fill them from `serialized_tokens`, `schema_tokens`, payload bytes, another provider counter, or an estimated model context. In particular, `total_tokens` is not automatically recomputed from input/output values.
+
+The adapter consumes a provider payload supplied by its caller; it does not make provider requests itself. Adapter errors identify contract/field names without including raw provider payloads or rejected field values.
+
+This interface is intentionally separate from the current `MeasurementEvent` trace record. Persisting or reporting provider usage alongside benchmark runs is future integration work and must preserve the same source labeling rather than relabeling MCP observations as provider usage.
+
 ## Exact versus derived metrics
 
 MCPMeter intentionally keeps unlike quantities separate.
@@ -91,7 +115,7 @@ MCPMeter intentionally keeps unlike quantities separate.
 ### Not measured by the stdio proxy
 
 - the final prompt or context assembled by an MCP host
-- provider billing tokens
+- provider billing/usage tokens unless independently supplied through a provider-usage adapter
 - hidden model/system tokens
 - host-side caching, truncation, deduplication, or schema transformation
 - HTTP/TLS/network framing bytes

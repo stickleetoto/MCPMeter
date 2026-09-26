@@ -47,6 +47,14 @@ Provides named tokenizer/profile implementations. Every token metric must carry 
 
 Aggregates observed byte counts, serialized token counts, call counts, errors, and latency distributions. Each metric must retain enough scope metadata to say what boundary it measures.
 
+### `provider_usage`
+
+Defines the versioned adapter boundary for provider-reported token usage. Adapter interface v1 accepts a provider response payload that is already available to the caller and may return normalized provider-reported `input_tokens`, `output_tokens`, and/or `total_tokens` together with adapter identity/version, provider identity, and optional model identity.
+
+Provider usage adapters do not inspect MCP transport measurements as a fallback and must not manufacture provider usage from `serialized_tokens`, schema tokens, payload bytes, or model-context estimates. Missing provider counters stay missing; for example, an adapter must not synthesize `total_tokens` by adding other counters unless that total was itself reported by the provider.
+
+The normalized record is explicitly labeled `provider_reported`. Adapter errors describe the failing field or contract condition without embedding the raw provider payload or field value.
+
 ### `redaction`
 
 Controls what, if anything, may be persisted from message content. Raw payload persistence is disabled by default.
@@ -69,6 +77,8 @@ MCPMeter must never collapse unlike quantities into one number.
 2. **serialized payload tokens** — tokenizer output for observed MCP JSON structures;
 3. **model-context estimate** — an estimate after host transformation assumptions;
 4. **provider usage** — actual usage reported by a model provider, if independently available.
+
+Provider-reported usage enters through the versioned `provider_usage` adapter contract and remains separate from the MCP observation path. The v1 adapter contract carries its own interface version plus adapter identity/version so changes in provider payload mapping can be identified independently of the MCP trace schema.
 
 For stdio, the current `wire_bytes` field is exact for the observed stdio frame, including its newline delimiter when present.
 
